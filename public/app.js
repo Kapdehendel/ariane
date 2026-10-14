@@ -1,3 +1,66 @@
-const health=document.querySelector("#health"),input=document.querySelector("#input"),button=document.querySelector("#analyze"),status=document.querySelector("#status"),result=document.querySelector("#result");
-async function checkHealth(){try{const r=await fetch("/health"),d=await r.json();health.textContent=d.aiConfigured?Backend en ligne · modèle ${d.model}:"Backend en ligne · IA non configurée"}catch{health.textContent="Backend non joignable"}} button.addEventListener("click",async()=&gt;{const text=input.value.trim();if(!text){status.textContent="Écris une situation avant de lancer l’analyse.";return}button.disabled=true;result.hidden=true;status.textContent="Analyse en cours…";try{const r=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({input:text})}),d=await r.json();if(!r.ok){status.textContent=d.message||"L’analyse a échoué.";if(d.fallback){result.textContent=JSON.stringify(d.fallback,null,2);result.hidden=false}return}status.textContent=Analyse terminée · ${d.model};result.textContent=d.analysis;result.hidden=false}catch{status.textContent="Impossible de joindre le backend. Vérifie son URL et son état."}finally{button.disabled=false}});
+
+const health = document.querySelector("#health");
+const input = document.querySelector("#input");
+const button = document.querySelector("#analyze");
+const status = document.querySelector("#status");
+const result = document.querySelector("#result");
+
+async function checkHealth() {
+  try {
+    const response = await fetch("/health");
+    const data = await response.json();
+
+    health.textContent = data.aiConfigured
+      ? `Backend en ligne · modèle ${data.model}`
+      : "Backend en ligne · IA non configurée";
+  } catch {
+    health.textContent = "Backend non joignable";
+  }
+}
+
+button.addEventListener("click", async () => {
+  const text = input.value.trim();
+
+  if (!text) {
+    status.textContent = "Écris une situation avant de lancer l’analyse.";
+    return;
+  }
+
+  button.disabled = true;
+  result.hidden = true;
+  status.textContent = "Analyse en cours…";
+
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ input: text })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      status.textContent = data.message || "L’analyse a échoué.";
+
+      if (data.fallback) {
+        result.textContent = JSON.stringify(data.fallback, null, 2);
+        result.hidden = false;
+      }
+
+      return;
+    }
+
+    status.textContent = `Analyse terminée · ${data.model}`;
+    result.textContent = data.analysis;
+    result.hidden = false;
+  } catch {
+    status.textContent =
+      "Impossible de joindre le backend. Vérifie son URL et son état.";
+  } finally {
+    button.disabled = false;
+  }
+});
+
 checkHealth();
