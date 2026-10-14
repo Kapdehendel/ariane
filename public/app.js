@@ -12,10 +12,14 @@ const toggleSidebar = document.querySelector("#toggle-sidebar");
 const sidebar = document.querySelector("#sidebar");
 
 const STORAGE_KEY = "ariane_conversations_v1";
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 1200;
 
 let conversations = loadConversations();
 let activeId = null;
 let busy = false;
+let timerInterval = null;
+let requestStartedAt = 0;
 
 function makeId() {
   return globalThis.crypto?.randomUUID?.() ||
@@ -25,10 +29,11 @@ function makeId() {
 function loadConversations() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    return Array.isArray(saved) ? saved.filter(c =>
-      c && typeof c.id === "string" &&
-      Array.isArray(c.messages)
-    ) : [];
+    return Array.isArray(saved)
+      ? saved.filter(c =>
+          c && typeof c.id === "string" && Array.isArray(c.messages)
+        )
+      : [];
   } catch {
     return [];
   }
@@ -67,7 +72,6 @@ function createConversation() {
   status.textContent = "Nouvelle conversation";
   input.value = "";
   input.focus();
-
   sidebar.classList.remove("mobile-open");
 }
 
@@ -127,17 +131,13 @@ function renderHistory() {
     remove.addEventListener("click", () => {
       if (busy) return;
 
-      const confirmed = window.confirm(
+      if (!window.confirm(
         `Supprimer la conversation « ${conversation.title} » ?`
-      );
-
-      if (!confirmed) return;
+      )) return;
 
       conversations = conversations.filter(c => c.id !== conversation.id);
 
-      if (activeId === conversation.id) {
-        activeId = null;
-      }
+      if (activeId === conversation.id) activeId = null;
 
       saveConversations();
       renderHistory();
@@ -147,6 +147,57 @@ function renderHistory() {
 
     item.append(open, remove);
     historyList.append(item);
+  }
+}
+
+function copyText(text, copyButton) {
+  const originalLabel = copyButton.textContent;
+
+  function showCopied() {
+    copyButton.textContent = "Copié !";
+    copyButton.disabled = true;
+
+    window.setTimeout(() => {
+      copyButton.textContent = originalLabel;
+      copyButton.disabled = false;
+    }, 1400);
+  }
+
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(showCopied)
+      .catch(() => fallbackCopy(text, copyButton, originalLabel, showCopied));
+  } else {
+    fallbackCopy(text, copyButton, originalLabel, showCopied);
+  }
+}
+
+function fallbackCopy(text, copyButton, originalLabel, onSuccess) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  area.setAttribute("readonly", "");
+  document.body.append(area);
+  area.select();
+
+  try {
+    const success = document.execCommand("copy");
+    if (success) {
+      onSuccess();
+    } else {
+      copyButton.textContent = "Copie impossible";
+      window.setTimeout(() => {
+        copyButton.textContent = originalLabel;
+      }, 1800);
+    }
+  } catch {
+    copyButton.textContent = "Copie impossible";
+    window.setTimeout(() => {
+      copyButton.textContent = originalLabel;
+    }, 1800);
+  } finally {
+    area.remove();
   }
 }
 
@@ -165,7 +216,8 @@ function renderMessages() {
 
   for (const message of conversation.messages) {
     const row = document.createElement("article");
-    row.className = `message ${message.role === "user" ? "user" : "assistant"}`;
+    row.className =
+      `message ${message.role === "user" ? "user" : "assistant"}`;
 
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
@@ -181,10 +233,26 @@ function renderMessages() {
 
     const content = document.createElement("div");
     content.className = "message-content";
-    // Affichage en texte brut : le contenu du modèle n'est pas interprété comme HTML.
     content.textContent = message.content;
 
     body.append(name, content);
+
+    if (message.role === "assistant") {
+      const actions = document.createElement("div");
+      actions.className = "message-actions";
+
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "copy-response";
+      copyButton.textContent = "Copier";
+      copyButton.title = "Copier la réponse d’ARIANE";
+      copyButton.addEventListener("click", () => {
+        copyText(message.content, copyButton);
+      });
+
+      actions.append(copyButton);
+      body.append(actions);
+    }
 
     if (message.model && message.role === "assistant") {
       const meta = document.createElement("div");
@@ -198,11 +266,35 @@ function renderMessages() {
   }
 
   requestAnimationFrame(() => {
-    document.querySelector(".conversation")?.scrollTo({
-      top: document.querySelector(".conversation").scrollHeight,
-      behavior: "smooth"
-    });
+    const panel = document.querySelector(".conversation");
+    if (panel) {
+      panel.scrollTo({
+        top: panel.scrollHeight,
+        behavior: "smooth"
+      });
+    }
   });
+}
+
+function updateTimer() {
+  if (!busy || !requestStartedAt) return;
+
+  const seconds = Math.floor((Date.now() - requestStartedAt) / 1000);
+  status.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
+}
+
+function startTimer() {
+  stopTimer();
+  requestStartedAt = Date.now();
+  updateTimer();
+  timerInterval = window.setInterval(updateTimer, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval !== null) {
+    window.clearInterval(timerInterval);
+    timerInterval = null;
+  }
 }
 
 function setBusy(value) {
@@ -217,6 +309,67 @@ function setBusy(value) {
 function resizeInput() {
   input.style.height = "auto";
   input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+}
+
+function delay(ms) {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+async function requestAnalysis(fullInput) {
+  let lastError;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0) {
+        status.textContent = "Nouvel essai automatique…";
+        await delay(RETRY_DELAY_MS);
+        updateTimer();
+      }
+
+      const response = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ input: fullInput })
+      });
+
+      const raw = await response.text();
+      let data = {};
+
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = { message: "Le serveur a renvoyé une réponse illisible." };
+      }
+
+      if (response.ok) return { data };
+
+      const error = new Error(
+        data.message || `Erreur du serveur (${response.status}).`
+      );
+      error.status = response.status;
+      error.data = data;
+
+      // Une seule nouvelle tentative pour les erreurs temporaires.
+      if (
+        attempt < MAX_RETRIES &&
+        (response.status === 429 || response.status >= 500)
+      ) {
+        lastError = error;
+        continue;
+      }
+
+      return { error, data };
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < MAX_RETRIES) continue;
+    }
+  }
+
+  return {
+    error: lastError || new Error("La requête a échoué."),
+    data: lastError?.data || {}
+  };
 }
 
 async function sendMessage(text) {
@@ -247,11 +400,10 @@ async function sendMessage(text) {
 
   input.value = "";
   resizeInput();
-  status.textContent = "ARIANE réfléchit…";
   setBusy(true);
+  startTimer();
 
   try {
-    // Transmet les derniers messages pour maintenir le contexte de la discussion.
     const previousMessages = conversation.messages.slice(0, -1).slice(-10);
 
     const transcript = previousMessages.map(message => {
@@ -267,29 +419,32 @@ async function sendMessage(text) {
       userMessage.content
     ].join("\n\n");
 
-    const response = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ input: fullInput })
-    });
+    const result = await requestAnalysis(fullInput);
+    const elapsed = Math.floor((Date.now() - requestStartedAt) / 1000);
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      const message = data.message || "L’analyse a échoué.";
-      status.textContent = message;
+    if (result.error) {
+      const data = result.data || {};
+      const errorMessage = result.error.message ||
+        "La requête a échoué après la nouvelle tentative.";
 
       if (data.fallback) {
         conversation.messages.push({
           role: "assistant",
           content: typeof data.fallback === "string"
             ? data.fallback
-            : JSON.stringify(data.fallback, null, 2)
+            : JSON.stringify(data.fallback, null, 2),
+          model: data.model || ""
         });
+        saveConversations();
+        renderMessages();
       }
 
+      status.textContent =
+        `Échec après ${elapsed} s : ${errorMessage}`;
       return;
     }
+
+    const data = result.data;
 
     conversation.messages.push({
       role: "assistant",
@@ -301,11 +456,10 @@ async function sendMessage(text) {
     saveConversations();
     renderMessages();
 
-    status.textContent = `Réponse reçue · ${data.model || "ARIANE"}`;
-  } catch {
     status.textContent =
-      "Impossible de joindre le backend. Vérifie que Render est en ligne.";
+      `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
   } finally {
+    stopTimer();
     setBusy(false);
     saveConversations();
     renderHistory();
@@ -316,6 +470,7 @@ async function sendMessage(text) {
 
 chatForm.addEventListener("submit", event => {
   event.preventDefault();
+  if (busy) return;
   sendMessage(input.value);
 });
 
