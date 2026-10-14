@@ -20,6 +20,24 @@ let activeId = null;
 let busy = false;
 let timerInterval = null;
 let requestStartedAt = 0;
+let editingMessageId = null;
+
+// Indicateur visible au-dessus de la zone de saisie.
+const timerDisplay = document.createElement("div");
+timerDisplay.id = "ariane-timer";
+timerDisplay.textContent = "ARIANE est prête.";
+Object.assign(timerDisplay.style, {
+  display: "none",
+  padding: "8px 16px",
+  margin: "0 20px 8px",
+  borderRadius: "10px",
+  background: "#30343b",
+  color: "#ffffff",
+  fontSize: "14px",
+  textAlign: "center"
+});
+
+chatForm.parentNode.insertBefore(timerDisplay, chatForm);
 
 function makeId() {
   return globalThis.crypto?.randomUUID?.() ||
@@ -43,8 +61,7 @@ function saveConversations() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
   } catch {
-    status.textContent =
-      "Impossible d’enregistrer l’historique sur cet appareil.";
+    status.textContent = "Impossible d’enregistrer l’historique sur cet appareil.";
   }
 }
 
@@ -112,8 +129,8 @@ function renderHistory() {
 
     open.addEventListener("click", () => {
       if (busy) return;
-
       activeId = conversation.id;
+      editingMessageId = null;
       renderHistory();
       renderMessages();
       status.textContent = "";
@@ -130,13 +147,9 @@ function renderHistory() {
 
     remove.addEventListener("click", () => {
       if (busy) return;
-
-      if (!window.confirm(
-        `Supprimer la conversation « ${conversation.title} » ?`
-      )) return;
+      if (!window.confirm(`Supprimer la conversation « ${conversation.title} » ?`)) return;
 
       conversations = conversations.filter(c => c.id !== conversation.id);
-
       if (activeId === conversation.id) activeId = null;
 
       saveConversations();
@@ -150,50 +163,53 @@ function renderHistory() {
   }
 }
 
-function copyText(text, copyButton) {
-  const originalLabel = "Copier";
-
-  function showCopied() {
-    copyButton.textContent = "Copié !";
-    window.setTimeout(() => {
-      copyButton.textContent = originalLabel;
-    }, 1400);
-  }
-
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text)
-      .then(showCopied)
-      .catch(() => fallbackCopy(text, copyButton, showCopied));
-  } else {
-    fallbackCopy(text, copyButton, showCopied);
-  }
+function makeActionButton(label, title, onClick, background = "#383d46") {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.title = title;
+  Object.assign(button.style, {
+    display: "inline-block",
+    padding: "8px 12px",
+    margin: "6px 8px 4px 0",
+    border: "1px solid #656b75",
+    borderRadius: "8px",
+    background,
+    color: "#ffffff",
+    fontSize: "14px",
+    cursor: "pointer"
+  });
+  button.addEventListener("click", onClick);
+  return button;
 }
 
-function fallbackCopy(text, copyButton, onSuccess) {
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  area.setAttribute("readonly", "");
-  document.body.append(area);
-  area.select();
-
+async function copyText(text, copyButton) {
   try {
-    if (document.execCommand("copy")) {
-      onSuccess();
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
     } else {
-      copyButton.textContent = "Copie impossible";
-      window.setTimeout(() => {
-        copyButton.textContent = "Copier";
-      }, 1800);
+      const area = document.createElement("textarea");
+      area.value = text;
+      Object.assign(area.style, {
+        position: "fixed",
+        opacity: "0"
+      });
+      document.body.append(area);
+      area.select();
+      const success = document.execCommand("copy");
+      area.remove();
+      if (!success) throw new Error("Copie impossible");
     }
+
+    copyButton.textContent = "Copié !";
+    window.setTimeout(() => {
+      copyButton.textContent = "Copier";
+    }, 1400);
   } catch {
     copyButton.textContent = "Copie impossible";
     window.setTimeout(() => {
       copyButton.textContent = "Copier";
     }, 1800);
-  } finally {
-    area.remove();
   }
 }
 
@@ -210,23 +226,18 @@ function buildPrompt(conversation, userIndex) {
 
   return [
     "CONVERSATION ARIANE — CONTEXTE DES ÉCHANGES PRÉCÉDENTS",
-    "Les messages ci-dessous servent de contexte. Réponds au dernier message de l'utilisateur.",
+    "Les messages précédents servent de contexte. Réponds au dernier message de l'utilisateur.",
     transcript || "(Début de la conversation.)",
     "NOUVEAU MESSAGE DE L'UTILISATEUR :",
     userMessage.content
   ].join("\n\n");
 }
 
-function findPromptForAnswer(conversation, answerIndex, answer) {
-  if (answer.retryInput) return answer.retryInput;
-
+function findPreviousUserIndex(conversation, answerIndex) {
   for (let i = answerIndex - 1; i >= 0; i--) {
-    if (conversation.messages[i].role === "user") {
-      return buildPrompt(conversation, i);
-    }
+    if (conversation.messages[i].role === "user") return i;
   }
-
-  return null;
+  return -1;
 }
 
 function renderMessages() {
@@ -244,8 +255,7 @@ function renderMessages() {
 
   conversation.messages.forEach((message, index) => {
     const row = document.createElement("article");
-    row.className =
-      `message ${message.role === "user" ? "user" : "assistant"}`;
+    row.className = `message ${message.role === "user" ? "user" : "assistant"}`;
 
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
@@ -265,36 +275,46 @@ function renderMessages() {
 
     body.append(name, content);
 
+    if (message.role === "user") {
+      const lastUserIndex = conversation.messages.reduce(
+        (last, item, i) => item.role === "user" ? i : last, -1
+      );
+
+      // Modifier le dernier message utilisateur.
+      if (index === lastUserIndex) {
+        const editButton = makeActionButton(
+          "✎ Modifier",
+          "Modifier ce message et relancer ARIANE",
+          () => startEditing(conversation.id, message.id || index)
+        );
+        editButton.disabled = busy;
+        body.append(editButton);
+      }
+    }
+
     if (message.role === "assistant") {
       const actions = document.createElement("div");
       actions.className = "message-actions";
 
-      const copyButton = document.createElement("button");
-      copyButton.type = "button";
+      const copyButton = makeActionButton(
+        "Copier",
+        "Copier la réponse d’ARIANE",
+        () => copyText(message.content, copyButton)
+      );
       copyButton.className = "copy-response";
-      copyButton.textContent = "Copier";
-      copyButton.title = "Copier la réponse d’ARIANE";
-      copyButton.addEventListener("click", () => {
-        copyText(message.content, copyButton);
-      });
       actions.append(copyButton);
 
-      const retryPrompt = findPromptForAnswer(
-        conversation, index, message
-      );
+      const previousUserIndex = findPreviousUserIndex(conversation, index);
 
-      if (retryPrompt) {
-        const retryButton = document.createElement("button");
-        retryButton.type = "button";
+      if (previousUserIndex >= 0) {
+        const retryButton = makeActionButton(
+          "↻ Réessayer",
+          "Relancer cette demande sans ajouter de message",
+          () => retryAnswer(conversation.id, message, previousUserIndex),
+          "#244a39"
+        );
         retryButton.className = "retry-response";
-        retryButton.textContent = "↻ Réessayer";
-        retryButton.title = "Demander une nouvelle réponse au même prompt";
         retryButton.disabled = busy;
-
-        retryButton.addEventListener("click", () => {
-          retryAnswer(conversation.id, message, retryPrompt);
-        });
-
         actions.append(retryButton);
       }
 
@@ -323,16 +343,118 @@ function renderMessages() {
   });
 }
 
+function startEditing(conversationId, messageIdentifier) {
+  if (busy) return;
+
+  const conversation = conversations.find(c => c.id === conversationId);
+  if (!conversation) return;
+
+  let index = typeof messageIdentifier === "number"
+    ? messageIdentifier
+    : conversation.messages.findIndex(m => m.id === messageIdentifier);
+
+  if (index < 0 || conversation.messages[index]?.role !== "user") return;
+
+  editingMessageId = conversation.messages[index].id || index;
+  renderMessages();
+
+  const message = conversation.messages[index];
+  const userRows = [...messagesEl.querySelectorAll(".message.user")];
+  const userMessageIndices = conversation.messages
+    .map((m, i) => m.role === "user" ? i : -1)
+    .filter(i => i >= 0);
+  const position = userMessageIndices.indexOf(index);
+  const row = userRows[position];
+  if (!row) return;
+
+  const body = row.querySelector(".message-body");
+  const content = body.querySelector(".message-content");
+  content.replaceChildren();
+
+  const editor = document.createElement("textarea");
+  editor.value = message.content;
+  editor.setAttribute("aria-label", "Modifier le message utilisateur");
+  Object.assign(editor.style, {
+    display: "block",
+    width: "100%",
+    minHeight: "120px",
+    boxSizing: "border-box",
+    padding: "12px",
+    borderRadius: "10px",
+    background: "#17191d",
+    color: "#ffffff",
+    border: "1px solid #7c91b8",
+    font: "inherit"
+  });
+
+  const controls = document.createElement("div");
+  controls.style.display = "flex";
+  controls.style.flexWrap = "wrap";
+
+  const saveButton = makeActionButton(
+    "Enregistrer et relancer",
+    "Remplacer ce message et demander une nouvelle réponse",
+    async () => {
+      const corrected = editor.value.trim();
+      if (!corrected || busy) return;
+
+      // On conserve uniquement l'historique précédant le message modifié.
+      const priorMessages = conversation.messages.slice(0, index);
+      conversation.messages = priorMessages;
+
+      const editedMessage = {
+        role: "user",
+        content: corrected,
+        id: makeId(),
+        createdAt: Date.now()
+      };
+
+      conversation.messages.push(editedMessage);
+      conversation.updatedAt = Date.now();
+      updateTitle(conversation);
+      editingMessageId = null;
+
+      saveConversations();
+      renderHistory();
+      renderMessages();
+
+      const prompt = buildPrompt(
+        conversation,
+        conversation.messages.length - 1
+      );
+      await runPrompt(prompt, conversation);
+    },
+    "#244a39"
+  );
+
+  const cancelButton = makeActionButton(
+    "Annuler",
+    "Annuler la modification",
+    () => {
+      editingMessageId = null;
+      renderMessages();
+    }
+  );
+
+  controls.append(saveButton, cancelButton);
+  content.append(editor, controls);
+  editor.focus();
+}
+
 function updateTimer() {
   if (!busy || !requestStartedAt) return;
 
   const seconds = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
+  timerDisplay.style.display = "block";
+  timerDisplay.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
   status.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
 }
 
 function startTimer() {
   stopTimer();
   requestStartedAt = Date.now();
+  timerDisplay.style.display = "block";
+  timerDisplay.textContent = "⏱ ARIANE démarre… 0,0 s";
   updateTimer();
   timerInterval = window.setInterval(updateTimer, 100);
 }
@@ -368,7 +490,7 @@ async function requestAnalysis(fullInput) {
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       if (attempt > 0) {
-        status.textContent = "Nouvel essai automatique…";
+        timerDisplay.textContent = "Nouvel essai automatique…";
         await delay(RETRY_DELAY_MS);
         updateTimer();
       }
@@ -388,9 +510,7 @@ async function requestAnalysis(fullInput) {
         data = { message: "Le serveur a renvoyé une réponse illisible." };
       }
 
-      if (response.ok && data.analysis) {
-        return { data };
-      }
+      if (response.ok && data.analysis) return { data };
 
       const error = new Error(
         data.message ||
@@ -398,14 +518,13 @@ async function requestAnalysis(fullInput) {
           ? "Le serveur n’a renvoyé aucune analyse."
           : `Erreur du serveur (${response.status}).`)
       );
-
       error.status = response.status;
       error.data = data;
 
       if (
         attempt < MAX_RETRIES &&
-        (!response.ok &&
-          (response.status === 429 || response.status >= 500))
+        !response.ok &&
+        (response.status === 429 || response.status >= 500)
       ) {
         lastError = error;
         continue;
@@ -435,11 +554,8 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     const elapsed = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
 
     if (result.error) {
-      const errorMessage = result.error.message ||
-        "La requête a échoué après la nouvelle tentative.";
-
-      status.textContent =
-        `Échec après ${elapsed} s : ${errorMessage}`;
+      status.textContent = `Échec après ${elapsed} s : ${result.error.message}`;
+      timerDisplay.textContent = `Échec après ${elapsed} s. Tu peux réessayer.`;
       return;
     }
 
@@ -465,8 +581,8 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     saveConversations();
     renderMessages();
 
-    status.textContent =
-      `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
+    status.textContent = `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
+    timerDisplay.textContent = `✓ Réponse reçue en ${elapsed} s`;
   } finally {
     stopTimer();
     setBusy(false);
@@ -477,14 +593,14 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
   }
 }
 
-async function retryAnswer(conversationId, answer, fullInput) {
+async function retryAnswer(conversationId, answer, previousUserIndex) {
   if (busy) return;
 
   const conversation = conversations.find(c => c.id === conversationId);
   if (!conversation) return;
 
-  status.textContent = "Relance de la même demande…";
-  await runPrompt(fullInput, conversation, answer);
+  const prompt = answer.retryInput || buildPrompt(conversation, previousUserIndex);
+  await runPrompt(prompt, conversation, answer);
 }
 
 async function sendMessage(text) {
@@ -497,7 +613,6 @@ async function sendMessage(text) {
       messages: [],
       updatedAt: Date.now()
     };
-
     conversations.unshift(conversation);
     activeId = conversation.id;
   }
@@ -506,6 +621,7 @@ async function sendMessage(text) {
   const userMessage = {
     role: "user",
     content: text.trim(),
+    id: makeId(),
     createdAt: Date.now()
   };
 
@@ -520,10 +636,8 @@ async function sendMessage(text) {
   input.value = "";
   resizeInput();
 
-  const userIndex = conversation.messages.length - 1;
-  const fullInput = buildPrompt(conversation, userIndex);
-
-  await runPrompt(fullInput, conversation);
+  const prompt = buildPrompt(conversation, conversation.messages.length - 1);
+  await runPrompt(prompt, conversation);
 }
 
 chatForm.addEventListener("submit", event => {
