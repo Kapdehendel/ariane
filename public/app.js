@@ -20,23 +20,19 @@ let activeId = null;
 let busy = false;
 let timerInterval = null;
 let requestStartedAt = 0;
-let editingMessageId = null;
 
-// Indicateur visible au-dessus de la zone de saisie.
 const timerDisplay = document.createElement("div");
 timerDisplay.id = "ariane-timer";
-timerDisplay.textContent = "ARIANE est prête.";
 Object.assign(timerDisplay.style, {
   display: "none",
-  padding: "8px 16px",
-  margin: "0 20px 8px",
+  padding: "9px 14px",
+  margin: "8px 12px",
   borderRadius: "10px",
   background: "#30343b",
   color: "#ffffff",
   fontSize: "14px",
   textAlign: "center"
 });
-
 chatForm.parentNode.insertBefore(timerDisplay, chatForm);
 
 function makeId() {
@@ -81,7 +77,6 @@ function createConversation() {
 
   conversations.unshift(conversation);
   activeId = conversation.id;
-
   saveConversations();
   renderHistory();
   renderMessages();
@@ -126,11 +121,9 @@ function renderHistory() {
     open.textContent = conversation.title || "Nouvelle conversation";
     open.title = open.textContent;
     open.disabled = busy;
-
     open.addEventListener("click", () => {
       if (busy) return;
       activeId = conversation.id;
-      editingMessageId = null;
       renderHistory();
       renderMessages();
       status.textContent = "";
@@ -144,7 +137,6 @@ function renderHistory() {
     remove.title = "Supprimer cette conversation";
     remove.setAttribute("aria-label", `Supprimer ${open.textContent}`);
     remove.disabled = busy;
-
     remove.addEventListener("click", () => {
       if (busy) return;
       if (!window.confirm(`Supprimer la conversation « ${conversation.title} » ?`)) return;
@@ -164,11 +156,11 @@ function renderHistory() {
 }
 
 function makeActionButton(label, title, onClick, background = "#383d46") {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = label;
-  button.title = title;
-  Object.assign(button.style, {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  b.title = title;
+  Object.assign(b.style, {
     display: "inline-block",
     padding: "8px 12px",
     margin: "6px 8px 4px 0",
@@ -179,45 +171,36 @@ function makeActionButton(label, title, onClick, background = "#383d46") {
     fontSize: "14px",
     cursor: "pointer"
   });
-  button.addEventListener("click", onClick);
-  return button;
+  b.addEventListener("click", onClick);
+  return b;
 }
 
-async function copyText(text, copyButton) {
+async function copyText(text, b) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
     } else {
       const area = document.createElement("textarea");
       area.value = text;
-      Object.assign(area.style, {
-        position: "fixed",
-        opacity: "0"
-      });
+      Object.assign(area.style, { position: "fixed", opacity: "0" });
       document.body.append(area);
       area.select();
-      const success = document.execCommand("copy");
+      const ok = document.execCommand("copy");
       area.remove();
-      if (!success) throw new Error("Copie impossible");
+      if (!ok) throw new Error("Copie impossible");
     }
 
-    copyButton.textContent = "Copié !";
-    window.setTimeout(() => {
-      copyButton.textContent = "Copier";
-    }, 1400);
+    b.textContent = "Copié !";
+    window.setTimeout(() => b.textContent = "Copier", 1400);
   } catch {
-    copyButton.textContent = "Copie impossible";
-    window.setTimeout(() => {
-      copyButton.textContent = "Copier";
-    }, 1800);
+    b.textContent = "Copie impossible";
+    window.setTimeout(() => b.textContent = "Copier", 1800);
   }
 }
 
 function buildPrompt(conversation, userIndex) {
   const userMessage = conversation.messages[userIndex];
-  const previousMessages = conversation.messages
-    .slice(0, userIndex)
-    .slice(-10);
+  const previousMessages = conversation.messages.slice(0, userIndex).slice(-10);
 
   const transcript = previousMessages.map(message => {
     const speaker = message.role === "user" ? "Utilisateur" : "ARIANE";
@@ -233,7 +216,14 @@ function buildPrompt(conversation, userIndex) {
   ].join("\n\n");
 }
 
-function findPreviousUserIndex(conversation, answerIndex) {
+function lastUserMessageIndex(conversation) {
+  for (let i = conversation.messages.length - 1; i >= 0; i--) {
+    if (conversation.messages[i].role === "user") return i;
+  }
+  return -1;
+}
+
+function previousUserIndex(conversation, answerIndex) {
   for (let i = answerIndex - 1; i >= 0; i--) {
     if (conversation.messages[i].role === "user") return i;
   }
@@ -245,13 +235,14 @@ function renderMessages() {
 
   const conversation = currentConversation();
   const hasMessages = Boolean(conversation?.messages.length);
-
   welcome.classList.toggle("hidden", hasMessages);
 
   if (!conversation) {
     welcome.classList.remove("hidden");
     return;
   }
+
+  const lastUserIndex = lastUserMessageIndex(conversation);
 
   conversation.messages.forEach((message, index) => {
     const row = document.createElement("article");
@@ -272,50 +263,43 @@ function renderMessages() {
     const content = document.createElement("div");
     content.className = "message-content";
     content.textContent = message.content;
-
     body.append(name, content);
 
-    if (message.role === "user") {
-      const lastUserIndex = conversation.messages.reduce(
-        (last, item, i) => item.role === "user" ? i : last, -1
+    // Bouton Modifier : ajouté directement sous le dernier message utilisateur.
+    if (message.role === "user" && index === lastUserIndex) {
+      const edit = makeActionButton(
+        "✎ Modifier",
+        "Modifier ton dernier message",
+        () => editLastMessage(conversation.id),
+        "#244a39"
       );
-
-      // Modifier le dernier message utilisateur.
-      if (index === lastUserIndex) {
-        const editButton = makeActionButton(
-          "✎ Modifier",
-          "Modifier ce message et relancer ARIANE",
-          () => startEditing(conversation.id, message.id || index)
-        );
-        editButton.disabled = busy;
-        body.append(editButton);
-      }
+      edit.disabled = busy;
+      body.append(edit);
     }
 
     if (message.role === "assistant") {
       const actions = document.createElement("div");
       actions.className = "message-actions";
 
-      const copyButton = makeActionButton(
+      const copy = makeActionButton(
         "Copier",
         "Copier la réponse d’ARIANE",
-        () => copyText(message.content, copyButton)
+        () => copyText(message.content, copy)
       );
-      copyButton.className = "copy-response";
-      actions.append(copyButton);
+      copy.className = "copy-response";
+      actions.append(copy);
 
-      const previousUserIndex = findPreviousUserIndex(conversation, index);
-
-      if (previousUserIndex >= 0) {
-        const retryButton = makeActionButton(
+      const userIndex = previousUserIndex(conversation, index);
+      if (userIndex >= 0) {
+        const retry = makeActionButton(
           "↻ Réessayer",
-          "Relancer cette demande sans ajouter de message",
-          () => retryAnswer(conversation.id, message, previousUserIndex),
+          "Demander une nouvelle réponse au même prompt",
+          () => retryAnswer(conversation.id, message, userIndex),
           "#244a39"
         );
-        retryButton.className = "retry-response";
-        retryButton.disabled = busy;
-        actions.append(retryButton);
+        retry.className = "retry-response";
+        retry.disabled = busy;
+        actions.append(retry);
       }
 
       body.append(actions);
@@ -343,37 +327,32 @@ function renderMessages() {
   });
 }
 
-function startEditing(conversationId, messageIdentifier) {
+function editLastMessage(conversationId) {
   if (busy) return;
 
   const conversation = conversations.find(c => c.id === conversationId);
   if (!conversation) return;
 
-  let index = typeof messageIdentifier === "number"
-    ? messageIdentifier
-    : conversation.messages.findIndex(m => m.id === messageIdentifier);
-
-  if (index < 0 || conversation.messages[index]?.role !== "user") return;
-
-  editingMessageId = conversation.messages[index].id || index;
-  renderMessages();
+  const index = lastUserMessageIndex(conversation);
+  if (index < 0) return;
 
   const message = conversation.messages[index];
-  const userRows = [...messagesEl.querySelectorAll(".message.user")];
-  const userMessageIndices = conversation.messages
-    .map((m, i) => m.role === "user" ? i : -1)
-    .filter(i => i >= 0);
-  const position = userMessageIndices.indexOf(index);
-  const row = userRows[position];
-  if (!row) return;
+  const row = [...messagesEl.querySelectorAll(".message.user")].at(-1);
+  if (!row) {
+    status.textContent = "Impossible d’ouvrir l’éditeur de ce message.";
+    return;
+  }
 
   const body = row.querySelector(".message-body");
-  const content = body.querySelector(".message-content");
-  content.replaceChildren();
+  body.replaceChildren();
+
+  const name = document.createElement("div");
+  name.className = "message-name";
+  name.textContent = "Modifier ton message";
 
   const editor = document.createElement("textarea");
   editor.value = message.content;
-  editor.setAttribute("aria-label", "Modifier le message utilisateur");
+  editor.setAttribute("aria-label", "Modifier le dernier message");
   Object.assign(editor.style, {
     display: "block",
     width: "100%",
@@ -391,53 +370,43 @@ function startEditing(conversationId, messageIdentifier) {
   controls.style.display = "flex";
   controls.style.flexWrap = "wrap";
 
-  const saveButton = makeActionButton(
+  const save = makeActionButton(
     "Enregistrer et relancer",
-    "Remplacer ce message et demander une nouvelle réponse",
+    "Enregistrer le texte corrigé et demander une nouvelle réponse",
     async () => {
       const corrected = editor.value.trim();
       if (!corrected || busy) return;
 
-      // On conserve uniquement l'historique précédant le message modifié.
-      const priorMessages = conversation.messages.slice(0, index);
-      conversation.messages = priorMessages;
-
+      // Supprime l'ancien message et les réponses qui en dépendent.
+      conversation.messages = conversation.messages.slice(0, index);
       const editedMessage = {
         role: "user",
         content: corrected,
         id: makeId(),
         createdAt: Date.now()
       };
-
       conversation.messages.push(editedMessage);
+
       conversation.updatedAt = Date.now();
       updateTitle(conversation);
-      editingMessageId = null;
-
       saveConversations();
       renderHistory();
       renderMessages();
 
-      const prompt = buildPrompt(
-        conversation,
-        conversation.messages.length - 1
-      );
+      const prompt = buildPrompt(conversation, conversation.messages.length - 1);
       await runPrompt(prompt, conversation);
     },
     "#244a39"
   );
 
-  const cancelButton = makeActionButton(
+  const cancel = makeActionButton(
     "Annuler",
     "Annuler la modification",
-    () => {
-      editingMessageId = null;
-      renderMessages();
-    }
+    () => renderMessages()
   );
 
-  controls.append(saveButton, cancelButton);
-  content.append(editor, controls);
+  controls.append(save, cancel);
+  body.append(name, editor, controls);
   editor.focus();
 }
 
@@ -447,7 +416,7 @@ function updateTimer() {
   const seconds = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
   timerDisplay.style.display = "block";
   timerDisplay.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
-  status.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
+  status.textContent = timerDisplay.textContent;
 }
 
 function startTimer() {
@@ -503,7 +472,6 @@ async function requestAnalysis(fullInput) {
 
       const raw = await response.text();
       let data = {};
-
       try {
         data = raw ? JSON.parse(raw) : {};
       } catch {
@@ -560,17 +528,17 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     }
 
     const data = result.data;
-    const newContent = data.analysis || "Aucune réponse n’a été renvoyée.";
+    const content = data.analysis || "Aucune réponse n’a été renvoyée.";
 
     if (answerToReplace) {
-      answerToReplace.content = newContent;
+      answerToReplace.content = content;
       answerToReplace.model = data.model || "";
       answerToReplace.retryInput = fullInput;
       answerToReplace.updatedAt = Date.now();
     } else {
       conversation.messages.push({
         role: "assistant",
-        content: newContent,
+        content,
         model: data.model || "",
         retryInput: fullInput,
         updatedAt: Date.now()
@@ -593,13 +561,13 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
   }
 }
 
-async function retryAnswer(conversationId, answer, previousUserIndex) {
+async function retryAnswer(conversationId, answer, userIndex) {
   if (busy) return;
 
   const conversation = conversations.find(c => c.id === conversationId);
   if (!conversation) return;
 
-  const prompt = answer.retryInput || buildPrompt(conversation, previousUserIndex);
+  const prompt = answer.retryInput || buildPrompt(conversation, userIndex);
   await runPrompt(prompt, conversation, answer);
 }
 
@@ -618,17 +586,15 @@ async function sendMessage(text) {
   }
 
   const conversation = currentConversation();
-  const userMessage = {
+  conversation.messages.push({
     role: "user",
     content: text.trim(),
     id: makeId(),
     createdAt: Date.now()
-  };
+  });
 
-  conversation.messages.push(userMessage);
   conversation.updatedAt = Date.now();
   updateTitle(conversation);
-
   saveConversations();
   renderHistory();
   renderMessages();
