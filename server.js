@@ -103,7 +103,20 @@ L'absence d'incohérence détectée ne prouve pas qu'aucune incohérence n'exist
 Distingue toujours la portée du contrôle réalisé de la portée du verdict.
 Si le texte nécessaire à un audit n'est pas disponible, demande-le ou précise que l'audit direct est impossible.
 Pour toute conclusion importante, indique son statut et les éléments qui la justifient.
-Si une erreur est détectée, présente la formulation initiale, le problème identifié et la correction proposée.`;
+Si une erreur est détectée, présente la formulation initiale, le problème identifié et la correction proposée.
+
+
+Ne confonds jamais absence de confirmation et preuve de fausseté.
+Distingue explicitement :
+- absence d'information pertinente ;
+- données insuffisantes ;
+- contradiction documentée ;
+- réfutation suffisamment étayée.
+
+Une contradiction documentée doit être décrite avec sa source, son périmètre et sa portée.
+Ne conclus pas automatiquement qu'une affirmation est fausse parce qu'un document ne la confirme pas.
+Ne déclare pas une contradiction vérifiée si le document n'a pas réellement été examiné.
+Attribue un statut à l'affirmation elle-même, et distingue-le du statut des éléments qui la soutiennent ou la contredisent.`;
 
 app.get("/health", (_req, res) =>
   res.json({
