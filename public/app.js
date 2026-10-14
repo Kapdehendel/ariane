@@ -151,28 +151,25 @@ function renderHistory() {
 }
 
 function copyText(text, copyButton) {
-  const originalLabel = copyButton.textContent;
+  const originalLabel = "Copier";
 
   function showCopied() {
     copyButton.textContent = "Copié !";
-    copyButton.disabled = true;
-
     window.setTimeout(() => {
       copyButton.textContent = originalLabel;
-      copyButton.disabled = false;
     }, 1400);
   }
 
   if (navigator.clipboard?.writeText) {
     navigator.clipboard.writeText(text)
       .then(showCopied)
-      .catch(() => fallbackCopy(text, copyButton, originalLabel, showCopied));
+      .catch(() => fallbackCopy(text, copyButton, showCopied));
   } else {
-    fallbackCopy(text, copyButton, originalLabel, showCopied);
+    fallbackCopy(text, copyButton, showCopied);
   }
 }
 
-function fallbackCopy(text, copyButton, originalLabel, onSuccess) {
+function fallbackCopy(text, copyButton, onSuccess) {
   const area = document.createElement("textarea");
   area.value = text;
   area.style.position = "fixed";
@@ -182,23 +179,54 @@ function fallbackCopy(text, copyButton, originalLabel, onSuccess) {
   area.select();
 
   try {
-    const success = document.execCommand("copy");
-    if (success) {
+    if (document.execCommand("copy")) {
       onSuccess();
     } else {
       copyButton.textContent = "Copie impossible";
       window.setTimeout(() => {
-        copyButton.textContent = originalLabel;
+        copyButton.textContent = "Copier";
       }, 1800);
     }
   } catch {
     copyButton.textContent = "Copie impossible";
     window.setTimeout(() => {
-      copyButton.textContent = originalLabel;
+      copyButton.textContent = "Copier";
     }, 1800);
   } finally {
     area.remove();
   }
+}
+
+function buildPrompt(conversation, userIndex) {
+  const userMessage = conversation.messages[userIndex];
+  const previousMessages = conversation.messages
+    .slice(0, userIndex)
+    .slice(-10);
+
+  const transcript = previousMessages.map(message => {
+    const speaker = message.role === "user" ? "Utilisateur" : "ARIANE";
+    return `${speaker} :\n${message.content}`;
+  }).join("\n\n");
+
+  return [
+    "CONVERSATION ARIANE — CONTEXTE DES ÉCHANGES PRÉCÉDENTS",
+    "Les messages ci-dessous servent de contexte. Réponds au dernier message de l'utilisateur.",
+    transcript || "(Début de la conversation.)",
+    "NOUVEAU MESSAGE DE L'UTILISATEUR :",
+    userMessage.content
+  ].join("\n\n");
+}
+
+function findPromptForAnswer(conversation, answerIndex, answer) {
+  if (answer.retryInput) return answer.retryInput;
+
+  for (let i = answerIndex - 1; i >= 0; i--) {
+    if (conversation.messages[i].role === "user") {
+      return buildPrompt(conversation, i);
+    }
+  }
+
+  return null;
 }
 
 function renderMessages() {
@@ -214,7 +242,7 @@ function renderMessages() {
     return;
   }
 
-  for (const message of conversation.messages) {
+  conversation.messages.forEach((message, index) => {
     const row = document.createElement("article");
     row.className =
       `message ${message.role === "user" ? "user" : "assistant"}`;
@@ -249,8 +277,27 @@ function renderMessages() {
       copyButton.addEventListener("click", () => {
         copyText(message.content, copyButton);
       });
-
       actions.append(copyButton);
+
+      const retryPrompt = findPromptForAnswer(
+        conversation, index, message
+      );
+
+      if (retryPrompt) {
+        const retryButton = document.createElement("button");
+        retryButton.type = "button";
+        retryButton.className = "retry-response";
+        retryButton.textContent = "↻ Réessayer";
+        retryButton.title = "Demander une nouvelle réponse au même prompt";
+        retryButton.disabled = busy;
+
+        retryButton.addEventListener("click", () => {
+          retryAnswer(conversation.id, message, retryPrompt);
+        });
+
+        actions.append(retryButton);
+      }
+
       body.append(actions);
     }
 
@@ -263,7 +310,7 @@ function renderMessages() {
 
     row.append(avatar, body);
     messagesEl.append(row);
-  }
+  });
 
   requestAnimationFrame(() => {
     const panel = document.querySelector(".conversation");
@@ -279,7 +326,7 @@ function renderMessages() {
 function updateTimer() {
   if (!busy || !requestStartedAt) return;
 
-  const seconds = Math.floor((Date.now() - requestStartedAt) / 1000);
+  const seconds = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
   status.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
 }
 
@@ -287,7 +334,7 @@ function startTimer() {
   stopTimer();
   requestStartedAt = Date.now();
   updateTimer();
-  timerInterval = window.setInterval(updateTimer, 1000);
+  timerInterval = window.setInterval(updateTimer, 100);
 }
 
 function stopTimer() {
@@ -302,8 +349,8 @@ function setBusy(value) {
   button.disabled = value;
   input.disabled = value;
   newChatButton.disabled = value;
-
   renderHistory();
+  renderMessages();
 }
 
 function resizeInput() {
@@ -341,18 +388,24 @@ async function requestAnalysis(fullInput) {
         data = { message: "Le serveur a renvoyé une réponse illisible." };
       }
 
-      if (response.ok) return { data };
+      if (response.ok && data.analysis) {
+        return { data };
+      }
 
       const error = new Error(
-        data.message || `Erreur du serveur (${response.status}).`
+        data.message ||
+        (response.ok
+          ? "Le serveur n’a renvoyé aucune analyse."
+          : `Erreur du serveur (${response.status}).`)
       );
+
       error.status = response.status;
       error.data = data;
 
-      // Une seule nouvelle tentative pour les erreurs temporaires.
       if (
         attempt < MAX_RETRIES &&
-        (response.status === 429 || response.status >= 500)
+        (!response.ok &&
+          (response.status === 429 || response.status >= 500))
       ) {
         lastError = error;
         continue;
@@ -361,7 +414,6 @@ async function requestAnalysis(fullInput) {
       return { error, data };
     } catch (error) {
       lastError = error;
-
       if (attempt < MAX_RETRIES) continue;
     }
   }
@@ -370,6 +422,69 @@ async function requestAnalysis(fullInput) {
     error: lastError || new Error("La requête a échoué."),
     data: lastError?.data || {}
   };
+}
+
+async function runPrompt(fullInput, conversation, answerToReplace = null) {
+  if (busy) return;
+
+  setBusy(true);
+  startTimer();
+
+  try {
+    const result = await requestAnalysis(fullInput);
+    const elapsed = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
+
+    if (result.error) {
+      const errorMessage = result.error.message ||
+        "La requête a échoué après la nouvelle tentative.";
+
+      status.textContent =
+        `Échec après ${elapsed} s : ${errorMessage}`;
+      return;
+    }
+
+    const data = result.data;
+    const newContent = data.analysis || "Aucune réponse n’a été renvoyée.";
+
+    if (answerToReplace) {
+      answerToReplace.content = newContent;
+      answerToReplace.model = data.model || "";
+      answerToReplace.retryInput = fullInput;
+      answerToReplace.updatedAt = Date.now();
+    } else {
+      conversation.messages.push({
+        role: "assistant",
+        content: newContent,
+        model: data.model || "",
+        retryInput: fullInput,
+        updatedAt: Date.now()
+      });
+    }
+
+    conversation.updatedAt = Date.now();
+    saveConversations();
+    renderMessages();
+
+    status.textContent =
+      `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
+  } finally {
+    stopTimer();
+    setBusy(false);
+    saveConversations();
+    renderHistory();
+    renderMessages();
+    input.focus();
+  }
+}
+
+async function retryAnswer(conversationId, answer, fullInput) {
+  if (busy) return;
+
+  const conversation = conversations.find(c => c.id === conversationId);
+  if (!conversation) return;
+
+  status.textContent = "Relance de la même demande…";
+  await runPrompt(fullInput, conversation, answer);
 }
 
 async function sendMessage(text) {
@@ -388,7 +503,11 @@ async function sendMessage(text) {
   }
 
   const conversation = currentConversation();
-  const userMessage = { role: "user", content: text.trim() };
+  const userMessage = {
+    role: "user",
+    content: text.trim(),
+    createdAt: Date.now()
+  };
 
   conversation.messages.push(userMessage);
   conversation.updatedAt = Date.now();
@@ -400,72 +519,11 @@ async function sendMessage(text) {
 
   input.value = "";
   resizeInput();
-  setBusy(true);
-  startTimer();
 
-  try {
-    const previousMessages = conversation.messages.slice(0, -1).slice(-10);
+  const userIndex = conversation.messages.length - 1;
+  const fullInput = buildPrompt(conversation, userIndex);
 
-    const transcript = previousMessages.map(message => {
-      const speaker = message.role === "user" ? "Utilisateur" : "ARIANE";
-      return `${speaker} :\n${message.content}`;
-    }).join("\n\n");
-
-    const fullInput = [
-      "CONVERSATION ARIANE — CONTEXTE DES ÉCHANGES PRÉCÉDENTS",
-      "Les messages ci-dessous servent de contexte. Réponds au dernier message de l'utilisateur.",
-      transcript || "(Début de la conversation.)",
-      "NOUVEAU MESSAGE DE L'UTILISATEUR :",
-      userMessage.content
-    ].join("\n\n");
-
-    const result = await requestAnalysis(fullInput);
-    const elapsed = Math.floor((Date.now() - requestStartedAt) / 1000);
-
-    if (result.error) {
-      const data = result.data || {};
-      const errorMessage = result.error.message ||
-        "La requête a échoué après la nouvelle tentative.";
-
-      if (data.fallback) {
-        conversation.messages.push({
-          role: "assistant",
-          content: typeof data.fallback === "string"
-            ? data.fallback
-            : JSON.stringify(data.fallback, null, 2),
-          model: data.model || ""
-        });
-        saveConversations();
-        renderMessages();
-      }
-
-      status.textContent =
-        `Échec après ${elapsed} s : ${errorMessage}`;
-      return;
-    }
-
-    const data = result.data;
-
-    conversation.messages.push({
-      role: "assistant",
-      content: data.analysis || "Aucune réponse n’a été renvoyée.",
-      model: data.model || ""
-    });
-
-    conversation.updatedAt = Date.now();
-    saveConversations();
-    renderMessages();
-
-    status.textContent =
-      `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
-  } finally {
-    stopTimer();
-    setBusy(false);
-    saveConversations();
-    renderHistory();
-    renderMessages();
-    input.focus();
-  }
+  await runPrompt(fullInput, conversation);
 }
 
 chatForm.addEventListener("submit", event => {
