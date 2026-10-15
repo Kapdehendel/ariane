@@ -1,4 +1,7 @@
 
+const SUPABASE_URL = "https://spnlejufigfwjetspthx.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_RjUuJ6usQ__YGdzgwnF5wg_z8b81nEX";
+
 const health = document.querySelector("#health");
 const input = document.querySelector("#input");
 const button = document.querySelector("#analyze");
@@ -11,15 +14,25 @@ const newChatButton = document.querySelector("#new-chat");
 const toggleSidebar = document.querySelector("#toggle-sidebar");
 const sidebar = document.querySelector("#sidebar");
 
+const loginButton = document.querySelector("#google-login");
+const logoutButton = document.querySelector("#google-logout");
+const signedOutPanel = document.querySelector("#auth-signed-out");
+const signedInPanel = document.querySelector("#auth-signed-in");
+const authStatus = document.querySelector("#auth-status");
+const userEmail = document.querySelector("#user-email");
+const quotaDisplay = document.querySelector("#quota");
+
 const STORAGE_KEY = "ariane_conversations_v1";
-const MAX_RETRIES = 1;
-const RETRY_DELAY_MS = 1200;
 
 let conversations = loadConversations();
 let activeId = null;
 let busy = false;
 let timerInterval = null;
 let requestStartedAt = 0;
+let supabase = null;
+let session = null;
+let authReady = false;
+let remainingMessages = null;
 
 const timerDisplay = document.createElement("div");
 timerDisplay.id = "ariane-timer";
@@ -57,7 +70,8 @@ function saveConversations() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
   } catch {
-    status.textContent = "Impossible d’enregistrer l’historique sur cet appareil.";
+    status.textContent =
+      "Impossible d’enregistrer l’historique sur cet appareil.";
   }
 }
 
@@ -65,8 +79,161 @@ function currentConversation() {
   return conversations.find(c => c.id === activeId) || null;
 }
 
+function updateAccountUI() {
+  const loggedIn = Boolean(session?.access_token);
+
+  signedOutPanel.hidden = loggedIn;
+  signedInPanel.hidden = !loggedIn;
+
+  input.disabled = !loggedIn || busy || remainingMessages === 0;
+  button.disabled = !loggedIn || busy || remainingMessages === 0;
+  newChatButton.disabled = busy;
+
+  if (loggedIn) {
+    userEmail.textContent = session.user?.email || "Compte connecté";
+
+    quotaDisplay.textContent =
+      remainingMessages === null
+        ? "Messages restants : vérification…"
+        : `Messages restants : ${remainingMessages}/5`;
+
+    if (remainingMessages === 0) {
+      status.textContent = "Limite quotidienne atteinte. Reviens demain.";
+    }
+  } else if (authReady) {
+    userEmail.textContent = "";
+    quotaDisplay.textContent = "Messages restants : —/5";
+    remainingMessages = null;
+    status.textContent = "Connecte-toi pour commencer.";
+  }
+
+  renderHistory();
+}
+
+function updateQuota(data) {
+  if (Number.isInteger(data?.remaining)) {
+    remainingMessages = Math.max(0, Math.min(5, data.remaining));
+    updateAccountUI();
+  }
+}
+
+async function refreshSession() {
+  if (!supabase) return;
+
+  try {
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) throw error;
+
+    session = data.session;
+    authReady = true;
+    updateAccountUI();
+  } catch (error) {
+    console.error("Session Supabase indisponible:", error.message);
+    session = null;
+    authReady = true;
+    updateAccountUI();
+    authStatus.textContent =
+      "Impossible de vérifier la session. Recharge la page ou reconnecte-toi.";
+  }
+}
+
+async function signInWithGoogle() {
+  if (!supabase) {
+    authStatus.textContent = "La configuration Supabase est incomplète.";
+    return;
+  }
+
+  loginButton.disabled = true;
+  authStatus.textContent = "Ouverture de la connexion Google…";
+
+  try {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin
+      }
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    authStatus.textContent =
+      `Connexion impossible : ${error.message || "erreur Supabase"}`;
+    loginButton.disabled = false;
+  }
+}
+
+async function signOut() {
+  if (!supabase) return;
+
+  logoutButton.disabled = true;
+
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+
+    session = null;
+    remainingMessages = null;
+    authStatus.textContent = "Déconnexion effectuée.";
+    updateAccountUI();
+  } catch (error) {
+    authStatus.textContent =
+      `Déconnexion impossible : ${error.message || "erreur Supabase"}`;
+  } finally {
+    logoutButton.disabled = false;
+  }
+}
+
+async function initializeAuth() {
+  if (
+    !window.supabase ||
+    !SUPABASE_URL.startsWith("https://") ||
+    SUPABASE_PUBLISHABLE_KEY.startsWith("COLLE_ICI_") ||
+    !SUPABASE_PUBLISHABLE_KEY
+  ) {
+    authReady = true;
+    session = null;
+    updateAccountUI();
+    authStatus.textContent =
+      "Configuration Supabase manquante dans public/app.js.";
+    return;
+  }
+
+  try {
+    supabase = window.supabase.createClient(
+      SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      }
+    );
+
+    supabase.auth.onAuthStateChange((_event, newSession) => {
+      session = newSession;
+      authReady = true;
+      updateAccountUI();
+
+      authStatus.textContent = session
+        ? "Compte Google connecté."
+        : "Tu n’es pas connecté.";
+    });
+
+    await refreshSession();
+  } catch (error) {
+    authReady = true;
+    session = null;
+    updateAccountUI();
+    authStatus.textContent =
+      `Initialisation Supabase impossible : ${error.message}`;
+  }
+}
+
 function createConversation() {
-  if (busy) return;
+  if (busy || !session) return;
 
   const conversation = {
     id: makeId(),
@@ -139,7 +306,10 @@ function renderHistory() {
     remove.disabled = busy;
     remove.addEventListener("click", () => {
       if (busy) return;
-      if (!window.confirm(`Supprimer la conversation « ${conversation.title} » ?`)) return;
+
+      if (!window.confirm(
+        `Supprimer la conversation « ${conversation.title} » ?`
+      )) return;
 
       conversations = conversations.filter(c => c.id !== conversation.id);
       if (activeId === conversation.id) activeId = null;
@@ -160,6 +330,7 @@ function makeActionButton(label, title, onClick, background = "#383d46") {
   b.type = "button";
   b.textContent = label;
   b.title = title;
+
   Object.assign(b.style, {
     display: "inline-block",
     padding: "8px 12px",
@@ -171,6 +342,7 @@ function makeActionButton(label, title, onClick, background = "#383d46") {
     fontSize: "14px",
     cursor: "pointer"
   });
+
   b.addEventListener("click", onClick);
   return b;
 }
@@ -185,8 +357,10 @@ async function copyText(text, b) {
       Object.assign(area.style, { position: "fixed", opacity: "0" });
       document.body.append(area);
       area.select();
+
       const ok = document.execCommand("copy");
       area.remove();
+
       if (!ok) throw new Error("Copie impossible");
     }
 
@@ -265,7 +439,6 @@ function renderMessages() {
     content.textContent = message.content;
     body.append(name, content);
 
-    // Bouton Modifier : ajouté directement sous le dernier message utilisateur.
     if (message.role === "user" && index === lastUserIndex) {
       const edit = makeActionButton(
         "✎ Modifier",
@@ -273,6 +446,7 @@ function renderMessages() {
         () => editLastMessage(conversation.id),
         "#244a39"
       );
+
       edit.disabled = busy;
       body.append(edit);
     }
@@ -286,10 +460,12 @@ function renderMessages() {
         "Copier la réponse d’ARIANE",
         () => copyText(message.content, copy)
       );
+
       copy.className = "copy-response";
       actions.append(copy);
 
       const userIndex = previousUserIndex(conversation, index);
+
       if (userIndex >= 0) {
         const retry = makeActionButton(
           "↻ Réessayer",
@@ -297,8 +473,9 @@ function renderMessages() {
           () => retryAnswer(conversation.id, message, userIndex),
           "#244a39"
         );
+
         retry.className = "retry-response";
-        retry.disabled = busy;
+        retry.disabled = busy || !session || remainingMessages === 0;
         actions.append(retry);
       }
 
@@ -328,7 +505,7 @@ function renderMessages() {
 }
 
 function editLastMessage(conversationId) {
-  if (busy) return;
+  if (busy || !session) return;
 
   const conversation = conversations.find(c => c.id === conversationId);
   if (!conversation) return;
@@ -338,6 +515,7 @@ function editLastMessage(conversationId) {
 
   const message = conversation.messages[index];
   const row = [...messagesEl.querySelectorAll(".message.user")].at(-1);
+
   if (!row) {
     status.textContent = "Impossible d’ouvrir l’éditeur de ce message.";
     return;
@@ -353,6 +531,7 @@ function editLastMessage(conversationId) {
   const editor = document.createElement("textarea");
   editor.value = message.content;
   editor.setAttribute("aria-label", "Modifier le dernier message");
+
   Object.assign(editor.style, {
     display: "block",
     width: "100%",
@@ -377,15 +556,13 @@ function editLastMessage(conversationId) {
       const corrected = editor.value.trim();
       if (!corrected || busy) return;
 
-      // Supprime l'ancien message et les réponses qui en dépendent.
       conversation.messages = conversation.messages.slice(0, index);
-      const editedMessage = {
+      conversation.messages.push({
         role: "user",
         content: corrected,
         id: makeId(),
         createdAt: Date.now()
-      };
-      conversation.messages.push(editedMessage);
+      });
 
       conversation.updatedAt = Date.now();
       updateTitle(conversation);
@@ -393,8 +570,10 @@ function editLastMessage(conversationId) {
       renderHistory();
       renderMessages();
 
-      const prompt = buildPrompt(conversation, conversation.messages.length - 1);
-      await runPrompt(prompt, conversation);
+      await runPrompt(
+        buildPrompt(conversation, conversation.messages.length - 1),
+        conversation
+      );
     },
     "#244a39"
   );
@@ -437,9 +616,7 @@ function stopTimer() {
 
 function setBusy(value) {
   busy = value;
-  button.disabled = value;
-  input.disabled = value;
-  newChatButton.disabled = value;
+  updateAccountUI();
   renderHistory();
   renderMessages();
 }
@@ -449,70 +626,80 @@ function resizeInput() {
   input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
 }
 
-function delay(ms) {
-  return new Promise(resolve => window.setTimeout(resolve, ms));
-}
-
 async function requestAnalysis(fullInput) {
-  let lastError;
-
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      if (attempt > 0) {
-        timerDisplay.textContent = "Nouvel essai automatique…";
-        await delay(RETRY_DELAY_MS);
-        updateTimer();
-      }
-
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: fullInput })
-      });
-
-      const raw = await response.text();
-      let data = {};
-      try {
-        data = raw ? JSON.parse(raw) : {};
-      } catch {
-        data = { message: "Le serveur a renvoyé une réponse illisible." };
-      }
-
-      if (response.ok && data.analysis) return { data };
-
-      const error = new Error(
-        data.message ||
-        (response.ok
-          ? "Le serveur n’a renvoyé aucune analyse."
-          : `Erreur du serveur (${response.status}).`)
-      );
-      error.status = response.status;
-      error.data = data;
-
-      if (
-        attempt < MAX_RETRIES &&
-        !response.ok &&
-        (response.status === 429 || response.status >= 500)
-      ) {
-        lastError = error;
-        continue;
-      }
-
-      return { error, data };
-    } catch (error) {
-      lastError = error;
-      if (attempt < MAX_RETRIES) continue;
-    }
+  if (!supabase || !session?.access_token) {
+    return {
+      error: new Error("Connecte-toi avec Google avant d’envoyer un message."),
+      data: { error: "AUTH_REQUIRED" }
+    };
   }
 
-  return {
-    error: lastError || new Error("La requête a échoué."),
-    data: lastError?.data || {}
-  };
+  try {
+    // Une seule requête par tentative explicite :
+    // éviter de consommer plusieurs messages du quota sur un retry automatique.
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`
+      },
+      body: JSON.stringify({ input: fullInput })
+    });
+
+    const raw = await response.text();
+    let data = {};
+
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      data = { message: "Le serveur a renvoyé une réponse illisible." };
+    }
+
+    if (Number.isInteger(data.remaining)) {
+      updateQuota(data);
+    }
+
+    if (response.ok && data.analysis) {
+      return { data };
+    }
+
+    if (
+      response.status === 401 &&
+      supabase
+    ) {
+      session = null;
+      remainingMessages = null;
+      await refreshSession();
+    }
+
+    return {
+      error: new Error(
+        data.message || `Erreur du serveur (${response.status}).`
+      ),
+      data,
+      status: response.status
+    };
+  } catch (error) {
+    return {
+      error: new Error(
+        error.message || "Impossible de joindre le serveur ARIANE."
+      ),
+      data: {}
+    };
+  }
 }
 
 async function runPrompt(fullInput, conversation, answerToReplace = null) {
-  if (busy) return;
+  if (busy || !session?.access_token) {
+    status.textContent = "Connecte-toi avec Google pour utiliser ARIANE.";
+    return;
+  }
+
+  if (remainingMessages === 0) {
+    status.textContent = "Tu as utilisé tes cinq messages pour aujourd’hui.";
+    updateAccountUI();
+    return;
+  }
 
   setBusy(true);
   startTimer();
@@ -522,8 +709,14 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     const elapsed = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
 
     if (result.error) {
-      status.textContent = `Échec après ${elapsed} s : ${result.error.message}`;
-      timerDisplay.textContent = `Échec après ${elapsed} s. Tu peux réessayer.`;
+      status.textContent = result.error.message;
+
+      if (result.data?.error === "DAILY_LIMIT_REACHED") {
+        remainingMessages = 0;
+        updateAccountUI();
+      }
+
+      timerDisplay.textContent = `Échec après ${elapsed} s.`;
       return;
     }
 
@@ -549,7 +742,9 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     saveConversations();
     renderMessages();
 
-    status.textContent = `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
+    status.textContent =
+      `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`;
+
     timerDisplay.textContent = `✓ Réponse reçue en ${elapsed} s`;
   } finally {
     stopTimer();
@@ -557,12 +752,13 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     saveConversations();
     renderHistory();
     renderMessages();
-    input.focus();
+
+    if (session && remainingMessages !== 0) input.focus();
   }
 }
 
 async function retryAnswer(conversationId, answer, userIndex) {
-  if (busy) return;
+  if (busy || !session || remainingMessages === 0) return;
 
   const conversation = conversations.find(c => c.id === conversationId);
   if (!conversation) return;
@@ -572,7 +768,12 @@ async function retryAnswer(conversationId, answer, userIndex) {
 }
 
 async function sendMessage(text) {
-  if (busy || !text.trim()) return;
+  if (busy || !session || !text.trim()) return;
+
+  if (remainingMessages === 0) {
+    status.textContent = "Tu as utilisé tes cinq messages pour aujourd’hui.";
+    return;
+  }
 
   if (!currentConversation()) {
     const conversation = {
@@ -581,11 +782,13 @@ async function sendMessage(text) {
       messages: [],
       updatedAt: Date.now()
     };
+
     conversations.unshift(conversation);
     activeId = conversation.id;
   }
 
   const conversation = currentConversation();
+
   conversation.messages.push({
     role: "user",
     content: text.trim(),
@@ -602,16 +805,27 @@ async function sendMessage(text) {
   input.value = "";
   resizeInput();
 
-  const prompt = buildPrompt(conversation, conversation.messages.length - 1);
-  await runPrompt(prompt, conversation);
+  await runPrompt(
+    buildPrompt(conversation, conversation.messages.length - 1),
+    conversation
+  );
 }
 
 chatForm.addEventListener("submit", event => {
   event.preventDefault();
+
   if (busy) return;
+
+  if (!session) {
+    authStatus.textContent = "Connecte-toi avec Google pour commencer.";
+    return;
+  }
+
   sendMessage(input.value);
 });
 
+loginButton?.addEventListener("click", signInWithGoogle);
+logoutButton?.addEventListener("click", signOut);
 newChatButton.addEventListener("click", createConversation);
 
 toggleSidebar.addEventListener("click", () => {
@@ -624,6 +838,11 @@ toggleSidebar.addEventListener("click", () => {
 
 document.querySelectorAll(".suggestion").forEach(suggestion => {
   suggestion.addEventListener("click", () => {
+    if (!session) {
+      authStatus.textContent = "Connecte-toi avec Google pour commencer.";
+      return;
+    }
+
     input.value = suggestion.dataset.prompt || "";
     resizeInput();
     input.focus();
@@ -645,9 +864,14 @@ async function checkHealth() {
     if (!response.ok) throw new Error("Backend indisponible");
 
     const data = await response.json();
+
     health.textContent = data.aiConfigured
       ? `Backend en ligne · modèle ${data.model}`
       : "Backend en ligne · IA non configurée";
+
+    if (!data.authConfigured || !data.quotaConfigured) {
+      health.textContent = "Backend en ligne · configuration à vérifier";
+    }
   } catch {
     health.textContent = "Backend non joignable";
   }
@@ -656,3 +880,4 @@ async function checkHealth() {
 renderHistory();
 renderMessages();
 checkHealth();
+initializeAuth();
