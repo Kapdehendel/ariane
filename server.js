@@ -10,15 +10,22 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static("public"));
 
 const PORT = Number(process.env.PORT || 3000);
+
 const API_KEY = process.env.GROQ_API_KEY || "";
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
+
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+const SUPABASE_PUBLISHABLE_KEY =
+  process.env.SUPABASE_PUBLISHABLE_KEY || "";
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY || "";
+
+const DAILY_LIMIT = 5;
+const VERSION = "1.3.0";
 
 const WEB_SEARCH_MODELS = new Set([
   "openai/gpt-oss-20b",
   "openai/gpt-oss-120b"
 ]);
-
-const VERSION = "1.2.2";
 
 const systemPrompt = `Tu es ARIANE, intelligence d’audit et de diagnostic systémique orientée vers le Bien.
 
@@ -96,11 +103,173 @@ function getRateLimitHeaders(headers) {
   ];
 
   const result = {};
+
   for (const name of names) {
     const value = headers.get(name);
     if (value !== null) result[name] = value;
   }
+
   return result;
+}
+
+function supabaseConfigured() {
+  return Boolean(
+    SUPABASE_URL &&
+    SUPABASE_PUBLISHABLE_KEY &&
+    SUPABASE_SECRET_KEY
+  );
+}
+
+// Vérifie le jeton auprès de Supabase Auth.
+// L'identifiant utilisateur vient de Supabase, jamais du corps envoyé par le navigateur.
+async function authenticateUser(req) {
+  const authorization = req.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+
+  if (!match) {
+    return {
+      ok: false,
+      status: 401,
+      error: "AUTH_REQUIRED",
+      message: "Connecte-toi avec ton compte Google pour utiliser ARIANE."
+    };
+  }
+
+  if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
+    return {
+      ok: false,
+      status: 503,
+      error: "AUTH_NOT_CONFIGURED",
+      message: "L'authentification Supabase n'est pas configurée sur le serveur."
+    };
+  }
+
+  try {
+    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      method: "GET",
+      headers: {
+        apikey: SUPABASE_PUBLISHABLE_KEY,
+        Authorization: `Bearer ${match[1]}`
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: 401,
+        error: "INVALID_SESSION",
+        message: "Ta session a expiré ou n'est plus valide. Reconnecte-toi."
+      };
+    }
+
+    const user = await response.json().catch(() => null);
+
+    if (!user || typeof user.id !== "string") {
+      return {
+        ok: false,
+        status: 401,
+        error: "INVALID_SESSION",
+        message: "Supabase n'a pas pu confirmer ton identité. Reconnecte-toi."
+      };
+    }
+
+    return { ok: true, user };
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error: "AUTH_SERVICE_UNAVAILABLE",
+      message: "Impossible de vérifier la session Supabase. Réessaie plus tard."
+    };
+  }
+}
+
+// Appelle la fonction SQL existante :
+// public.consume_ariane_daily_message(p_user_id uuid)
+async function consumeDailyMessage(userId) {
+  if (!supabaseConfigured()) {
+    return {
+      ok: false,
+      status: 503,
+      error: "QUOTA_NOT_CONFIGURED",
+      message: "Le service de quota Supabase n'est pas entièrement configuré."
+    };
+  }
+
+  try {
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpc/consume_ariane_daily_message`,
+      {
+        method: "POST",
+        headers: {
+          apikey: SUPABASE_SECRET_KEY,
+          Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ p_user_id: userId }),
+        signal: AbortSignal.timeout(15000)
+      }
+    );
+
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      // Ne jamais journaliser les clés ni les en-têtes d'autorisation.
+      console.error("Supabase quota error:", JSON.stringify({
+        status: response.status,
+        code: result?.code || null,
+        message: result?.message || null
+      }));
+
+      return {
+        ok: false,
+        status: 503,
+        error: "QUOTA_CHECK_FAILED",
+        message: "Le compteur de messages est indisponible. Aucun appel à Groq n'a été effectué."
+      };
+    }
+
+    const quota = Array.isArray(result) ? result[0] : result;
+
+    if (
+      !quota ||
+      typeof quota.allowed !== "boolean" ||
+      typeof quota.remaining !== "number"
+    ) {
+      console.error("Supabase quota error: unexpected response format");
+
+      return {
+        ok: false,
+        status: 503,
+        error: "QUOTA_RESPONSE_INVALID",
+        message: "Le compteur Supabase a renvoyé une réponse inattendue."
+      };
+    }
+
+    if (!quota.allowed) {
+      return {
+        ok: true,
+        allowed: false,
+        remaining: 0,
+        limit: DAILY_LIMIT
+      };
+    }
+
+    return {
+      ok: true,
+      allowed: true,
+      remaining: quota.remaining,
+      limit: quota.limit || DAILY_LIMIT
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      error: "QUOTA_SERVICE_UNAVAILABLE",
+      message: "Impossible de joindre le compteur Supabase. Réessaie plus tard."
+    };
+  }
 }
 
 app.get("/health", (_req, res) => {
@@ -112,6 +281,11 @@ app.get("/health", (_req, res) => {
     version: VERSION,
     aiConfigured: Boolean(API_KEY),
     model: API_KEY ? MODEL : null,
+    authConfigured: Boolean(
+      SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY
+    ),
+    quotaConfigured: supabaseConfigured(),
+    dailyMessageLimit: DAILY_LIMIT,
     webSearchAvailable: Boolean(API_KEY) && modelSupportsSearch,
     webSearchMode: modelSupportsSearch
       ? "available-for-current-events-requests"
@@ -158,6 +332,36 @@ app.post("/api/analyze", async (req, res) => {
     });
   }
 
+  // 1. Vérifier l'identité.
+  const authentication = await authenticateUser(req);
+
+  if (!authentication.ok) {
+    return res.status(authentication.status).json({
+      error: authentication.error,
+      message: authentication.message
+    });
+  }
+
+  // 2. Réserver un message pour cet utilisateur authentifié.
+  // En cas d'erreur de quota, aucun appel à Groq n'est effectué.
+  const quota = await consumeDailyMessage(authentication.user.id);
+
+  if (!quota.ok) {
+    return res.status(quota.status).json({
+      error: quota.error,
+      message: quota.message
+    });
+  }
+
+  if (!quota.allowed) {
+    return res.status(429).json({
+      error: "DAILY_LIMIT_REACHED",
+      message: "Tu as utilisé tes 5 messages pour aujourd'hui. Reviens demain.",
+      remaining: 0,
+      limit: DAILY_LIMIT
+    });
+  }
+
   const requestBody = {
     model: MODEL,
     messages: [
@@ -192,7 +396,6 @@ app.post("/api/analyze", async (req, res) => {
       const providerError = payload?.error || {};
       const rateLimits = getRateLimitHeaders(upstream.headers);
 
-      // Ne jamais journaliser la clé API ni les en-têtes d'autorisation.
       console.error("Groq API error:", JSON.stringify({
         status: upstream.status,
         type: providerError.type || null,
@@ -226,25 +429,29 @@ app.post("/api/analyze", async (req, res) => {
           code: providerError.code || null,
           message: providerError.message || null
         },
-        rateLimits
+        rateLimits,
+        remaining: quota.remaining,
+        limit: quota.limit
       });
     }
 
     const choice = payload?.choices?.[0];
-    const message = choice?.message;
-    const analysis = message?.content;
+    const assistantMessage = choice?.message;
+    const analysis = assistantMessage?.content;
 
     if (typeof analysis !== "string" || !analysis.trim()) {
       return res.status(502).json({
         error: "AI_EMPTY_RESPONSE",
         message: useWebSearch
           ? "Groq n'a pas fourni de réponse textuelle après la requête de recherche."
-          : "Réponse IA vide."
+          : "Réponse IA vide.",
+        remaining: quota.remaining,
+        limit: quota.limit
       });
     }
 
-    const toolCalls = Array.isArray(message?.tool_calls)
-      ? message.tool_calls
+    const toolCalls = Array.isArray(assistantMessage?.tool_calls)
+      ? assistantMessage.tool_calls
       : [];
 
     return res.json({
@@ -254,7 +461,9 @@ app.post("/api/analyze", async (req, res) => {
       webSearchEnabled: useWebSearch,
       toolCallsReported: toolCalls.length,
       finishReason: choice?.finish_reason || null,
-      analysis
+      analysis,
+      remaining: quota.remaining,
+      limit: quota.limit
     });
   } catch (error) {
     const isTimeout = error?.name === "TimeoutError";
@@ -268,7 +477,9 @@ app.post("/api/analyze", async (req, res) => {
       error: isTimeout ? "AI_TIMEOUT" : "AI_CONNECTION_ERROR",
       message: isTimeout
         ? "La requête a dépassé le délai maximal de 90 secondes."
-        : "Impossible de joindre Groq. Réessaie plus tard."
+        : "Impossible de joindre Groq. Réessaie plus tard.",
+      remaining: quota.remaining,
+      limit: quota.limit
     });
   }
 });
@@ -291,9 +502,14 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(`ARIANE backend listening on port ${PORT}`);
   console.log(`Version: ${VERSION}`);
   console.log(`Model: ${MODEL}`);
-  console.log(
-    `Web search supported by configured model: ${
-      WEB_SEARCH_MODELS.has(MODEL) ? "yes" : "no"
-    }`
-  );
+  console.log(`Supabase auth configured: ${
+    Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) ? "yes" : "no"
+  }`);
+  console.log(`Supabase quota configured: ${
+    supabaseConfigured() ? "yes" : "no"
+  }`);
+  console.log(`Daily message limit: ${DAILY_LIMIT}`);
+  console.log(`Web search supported by configured model: ${
+    WEB_SEARCH_MODELS.has(MODEL) ? "yes" : "no"
+  }`);
 });
