@@ -131,6 +131,10 @@ function updateQuota(data) {
  * La bibliothèque n'a plus besoin d'être chargée dans index.html.
  */
 function loadSupabaseLibrary() {
+  return Promise.resolve({ createClient });
+}
+
+ {
   if (supabaseLoadingPromise) {
     return supabaseLoadingPromise;
   }
