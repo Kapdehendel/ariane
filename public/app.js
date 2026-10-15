@@ -1,5 +1,6 @@
 
 "use strict";
+
 import { createClient } from "@supabase/supabase-js";
 
 /* =========================================================
@@ -14,6 +15,8 @@ const SUPABASE_PUBLISHABLE_KEY =
 
 const DAILY_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "ariane_conversations_v1";
+
+/* Éléments de l'interface */
 
 const health = document.querySelector("#health");
 const input = document.querySelector("#input");
@@ -35,6 +38,8 @@ const authStatus = document.querySelector("#auth-status");
 const userEmail = document.querySelector("#user-email");
 const quotaDisplay = document.querySelector("#quota");
 
+/* État de l'application */
+
 let conversations = loadConversations();
 let activeId = null;
 let busy = false;
@@ -45,7 +50,8 @@ let session = null;
 let authReady = false;
 let remainingMessages = null;
 let authSubscription = null;
-let supabaseLoadingPromise = null;
+
+/* Minuterie */
 
 const timerDisplay = document.createElement("div");
 timerDisplay.id = "ariane-timer";
@@ -80,7 +86,9 @@ function setText(element, text) {
 
 function loadConversations() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    const saved = JSON.parse(
+      localStorage.getItem(STORAGE_KEY) || "[]"
+    );
 
     return Array.isArray(saved)
       ? saved.filter(conversation =>
@@ -97,16 +105,27 @@ function loadConversations() {
 
 function saveConversations() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(conversations)
+    );
   } catch (error) {
-    console.error("Enregistrement de l'historique impossible :", error);
-    setText(status, "Impossible d’enregistrer l’historique sur cet appareil.");
+    console.error(
+      "Enregistrement de l'historique impossible :",
+      error
+    );
+
+    setText(
+      status,
+      "Impossible d’enregistrer l’historique sur cet appareil."
+    );
   }
 }
 
 function currentConversation() {
-  return conversations.find(conversation => conversation.id === activeId) ||
-    null;
+  return conversations.find(
+    conversation => conversation.id === activeId
+  ) || null;
 }
 
 function updateQuota(data) {
@@ -121,48 +140,17 @@ function updateQuota(data) {
 }
 
 /* =========================================================
-   AUTHENTIFICATION — IMPORT ESM DE SUPABASE
+   AUTHENTIFICATION — SUPABASE INTÉGRÉ AU BUNDLE
    ========================================================= */
 
 /*
- * Important :
- * Cette version ne dépend pas de window.supabase.
- * Elle importe directement le module JavaScript ESM.
- * La bibliothèque n'a plus besoin d'être chargée dans index.html.
+ * Supabase est importé depuis le paquet npm.
+ * Esbuild intègre cette dépendance dans app.bundle.js.
+ * Aucun CDN Supabase n'est nécessaire dans index.html.
  */
+
 function loadSupabaseLibrary() {
   return Promise.resolve({ createClient });
-}
-
- {
-  if (supabaseLoadingPromise) {
-    return supabaseLoadingPromise;
-  }
-
-  supabaseLoadingPromise = import(
-    "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
-  )
-    .then(module => {
-      if (typeof module.createClient !== "function") {
-        throw new Error(
-          "Le module chargé ne fournit pas createClient."
-        );
-      }
-
-      return module;
-    })
-    .catch(error => {
-      supabaseLoadingPromise = null;
-      console.error("Chargement du module Supabase impossible :", error);
-
-      throw new Error(
-        "Impossible de charger le module Supabase. " +
-        "Le navigateur ou le réseau peut bloquer le CDN. " +
-        (error?.message || "")
-      );
-    });
-
-  return supabaseLoadingPromise;
 }
 
 function updateAccountUI() {
@@ -172,11 +160,13 @@ function updateAccountUI() {
   if (signedInPanel) signedInPanel.hidden = !loggedIn;
 
   if (input) {
-    input.disabled = !loggedIn || busy || remainingMessages === 0;
+    input.disabled =
+      !loggedIn || busy || remainingMessages === 0;
   }
 
   if (button) {
-    button.disabled = !loggedIn || busy || remainingMessages === 0;
+    button.disabled =
+      !loggedIn || busy || remainingMessages === 0;
   }
 
   if (newChatButton) {
@@ -184,7 +174,10 @@ function updateAccountUI() {
   }
 
   if (loggedIn) {
-    setText(userEmail, session.user?.email || "Compte connecté");
+    setText(
+      userEmail,
+      session.user?.email || "Compte connecté"
+    );
 
     setText(
       quotaDisplay,
@@ -194,10 +187,14 @@ function updateAccountUI() {
     );
 
     if (remainingMessages === 0) {
-      setText(status, "Limite quotidienne atteinte. Reviens demain.");
+      setText(
+        status,
+        "Limite quotidienne atteinte. Reviens demain."
+      );
     }
   } else if (authReady) {
     setText(userEmail, "");
+
     setText(
       quotaDisplay,
       `Messages restants : —/${DAILY_MESSAGE_LIMIT}`
@@ -227,7 +224,10 @@ async function refreshSession() {
         : "Connecte-toi avec Google pour commencer."
     );
   } catch (error) {
-    console.error("Session Supabase indisponible :", error);
+    console.error(
+      "Session Supabase indisponible :",
+      error
+    );
 
     session = null;
     authReady = true;
@@ -251,10 +251,14 @@ async function signInWithGoogle() {
   }
 
   if (loginButton) loginButton.disabled = true;
-  setText(authStatus, "Ouverture de la connexion Google…");
+
+  setText(
+    authStatus,
+    "Ouverture de la connexion Google…"
+  );
 
   try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: window.location.origin
@@ -262,13 +266,6 @@ async function signInWithGoogle() {
     });
 
     if (error) throw error;
-
-    if (!data?.url) {
-      setText(
-        authStatus,
-        "Supabase n'a pas fourni l'adresse de connexion Google."
-      );
-    }
   } catch (error) {
     console.error("Connexion Google impossible :", error);
 
@@ -276,7 +273,7 @@ async function signInWithGoogle() {
       authStatus,
       `Connexion impossible : ${error.message || "erreur Supabase"}`
     );
-  } finally {
+
     if (loginButton) loginButton.disabled = false;
   }
 }
@@ -295,6 +292,7 @@ async function signOut() {
     remainingMessages = null;
 
     setText(authStatus, "Déconnexion effectuée.");
+
     updateAccountUI();
     renderMessages();
   } catch (error) {
@@ -311,7 +309,11 @@ async function signOut() {
 
 async function initializeAuth() {
   authReady = false;
-  setText(authStatus, "Initialisation de la connexion…");
+
+  setText(
+    authStatus,
+    "Initialisation de la connexion…"
+  );
 
   if (
     !SUPABASE_URL.startsWith("https://") ||
@@ -320,12 +322,14 @@ async function initializeAuth() {
   ) {
     authReady = true;
     session = null;
+
     updateAccountUI();
 
     setText(
       authStatus,
       "Configuration Supabase invalide : vérifie l'URL et la clé publique."
     );
+
     return;
   }
 
@@ -375,7 +379,10 @@ async function initializeAuth() {
 
     await refreshSession();
   } catch (error) {
-    console.error("Initialisation Supabase impossible :", error);
+    console.error(
+      "Initialisation Supabase impossible :",
+      error
+    );
 
     supabase = null;
     session = null;
@@ -428,8 +435,10 @@ function updateTitle(conversation) {
 
   if (firstUserMessage) {
     conversation.title =
-      firstUserMessage.content.replace(/\s+/g, " ").trim().slice(0, 48) ||
-      "Nouvelle conversation";
+      firstUserMessage.content
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 48) || "Nouvelle conversation";
   }
 }
 
@@ -441,7 +450,9 @@ function renderHistory() {
   if (!conversations.length) {
     const empty = document.createElement("p");
     empty.className = "empty-history";
-    empty.textContent = "Tes conversations apparaîtront ici.";
+    empty.textContent =
+      "Tes conversations apparaîtront ici.";
+
     historyList.append(empty);
     return;
   }
@@ -456,7 +467,8 @@ function renderHistory() {
     const open = document.createElement("button");
     open.type = "button";
     open.className = "history-open";
-    open.textContent = conversation.title || "Nouvelle conversation";
+    open.textContent =
+      conversation.title || "Nouvelle conversation";
     open.title = open.textContent;
     open.disabled = busy;
 
@@ -464,6 +476,7 @@ function renderHistory() {
       if (busy) return;
 
       activeId = conversation.id;
+
       renderHistory();
       renderMessages();
 
@@ -476,21 +489,30 @@ function renderHistory() {
     remove.className = "history-delete";
     remove.textContent = "×";
     remove.title = "Supprimer cette conversation";
-    remove.setAttribute("aria-label", `Supprimer ${open.textContent}`);
+
+    remove.setAttribute(
+      "aria-label",
+      `Supprimer ${open.textContent}`
+    );
+
     remove.disabled = busy;
 
     remove.addEventListener("click", () => {
       if (busy) return;
 
-      if (!window.confirm(
+      const confirmed = window.confirm(
         `Supprimer la conversation « ${conversation.title} » ?`
-      )) return;
+      );
+
+      if (!confirmed) return;
 
       conversations = conversations.filter(
         item => item.id !== conversation.id
       );
 
-      if (activeId === conversation.id) activeId = null;
+      if (activeId === conversation.id) {
+        activeId = null;
+      }
 
       saveConversations();
       renderHistory();
@@ -533,6 +555,7 @@ function makeActionButton(
   });
 
   b.addEventListener("click", onClick);
+
   return b;
 }
 
@@ -559,12 +582,18 @@ async function copyText(text, b) {
     }
 
     b.textContent = "Copié !";
-    window.setTimeout(() => b.textContent = "Copier", 1400);
+
+    window.setTimeout(() => {
+      b.textContent = "Copier";
+    }, 1400);
   } catch (error) {
     console.error("Copie impossible :", error);
 
     b.textContent = "Copie impossible";
-    window.setTimeout(() => b.textContent = "Copier", 1800);
+
+    window.setTimeout(() => {
+      b.textContent = "Copier";
+    }, 1800);
   }
 }
 
@@ -574,12 +603,15 @@ async function copyText(text, b) {
 
 function buildPrompt(conversation, userIndex) {
   const userMessage = conversation.messages[userIndex];
+
   const previousMessages = conversation.messages
     .slice(0, userIndex)
     .slice(-10);
 
   const transcript = previousMessages.map(message => {
-    const speaker = message.role === "user" ? "Utilisateur" : "ARIANE";
+    const speaker =
+      message.role === "user" ? "Utilisateur" : "ARIANE";
+
     return `${speaker} :\n${message.content}`;
   }).join("\n\n");
 
@@ -596,6 +628,7 @@ function lastUserMessageIndex(conversation) {
   for (let i = conversation.messages.length - 1; i >= 0; i--) {
     if (conversation.messages[i].role === "user") return i;
   }
+
   return -1;
 }
 
@@ -603,6 +636,7 @@ function previousUserIndex(conversation, answerIndex) {
   for (let i = answerIndex - 1; i >= 0; i--) {
     if (conversation.messages[i].role === "user") return i;
   }
+
   return -1;
 }
 
@@ -629,12 +663,14 @@ function renderMessages() {
 
   conversation.messages.forEach((message, index) => {
     const row = document.createElement("article");
+
     row.className =
       `message ${message.role === "user" ? "user" : "assistant"}`;
 
     const avatar = document.createElement("div");
     avatar.className = "message-avatar";
-    avatar.textContent = message.role === "user" ? "T" : "A";
+    avatar.textContent =
+      message.role === "user" ? "T" : "A";
     avatar.setAttribute("aria-hidden", "true");
 
     const body = document.createElement("div");
@@ -642,7 +678,8 @@ function renderMessages() {
 
     const name = document.createElement("div");
     name.className = "message-name";
-    name.textContent = message.role === "user" ? "Toi" : "ARIANE";
+    name.textContent =
+      message.role === "user" ? "Toi" : "ARIANE";
 
     const content = document.createElement("div");
     content.className = "message-content";
@@ -686,7 +723,9 @@ function renderMessages() {
         );
 
         retry.className = "retry-response";
-        retry.disabled = busy || !session || remainingMessages === 0;
+        retry.disabled =
+          busy || !session || remainingMessages === 0;
+
         actions.append(retry);
       }
 
@@ -733,7 +772,10 @@ function editLastMessage(conversationId) {
   if (index < 0) return;
 
   const message = conversation.messages[index];
-  const rows = messagesEl?.querySelectorAll(".message.user") || [];
+
+  const rows =
+    messagesEl?.querySelectorAll(".message.user") || [];
+
   const row = rows[rows.length - 1];
 
   if (!row) {
@@ -752,7 +794,10 @@ function editLastMessage(conversationId) {
 
   const editor = document.createElement("textarea");
   editor.value = message.content;
-  editor.setAttribute("aria-label", "Modifier le dernier message");
+  editor.setAttribute(
+    "aria-label",
+    "Modifier le dernier message"
+  );
 
   Object.assign(editor.style, {
     display: "block",
@@ -776,9 +821,11 @@ function editLastMessage(conversationId) {
     "Enregistrer le texte corrigé et demander une nouvelle réponse",
     async () => {
       const corrected = editor.value.trim();
+
       if (!corrected || busy) return;
 
-      conversation.messages = conversation.messages.slice(0, index);
+      conversation.messages =
+        conversation.messages.slice(0, index);
 
       conversation.messages.push({
         role: "user",
@@ -788,13 +835,17 @@ function editLastMessage(conversationId) {
       });
 
       conversation.updatedAt = Date.now();
+
       updateTitle(conversation);
       saveConversations();
       renderHistory();
       renderMessages();
 
       await runPrompt(
-        buildPrompt(conversation, conversation.messages.length - 1),
+        buildPrompt(
+          conversation,
+          conversation.messages.length - 1
+        ),
         conversation
       );
     },
@@ -809,6 +860,7 @@ function editLastMessage(conversationId) {
 
   controls.append(save, cancel);
   body.append(name, editor, controls);
+
   editor.focus();
 }
 
@@ -819,9 +871,13 @@ function editLastMessage(conversationId) {
 function updateTimer() {
   if (!busy || !requestStartedAt) return;
 
-  const seconds = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
+  const seconds =
+    ((Date.now() - requestStartedAt) / 1000).toFixed(1);
+
   timerDisplay.style.display = "block";
-  timerDisplay.textContent = `⏱ ARIANE réfléchit… ${seconds} s`;
+  timerDisplay.textContent =
+    `⏱ ARIANE réfléchit… ${seconds} s`;
+
   setText(status, timerDisplay.textContent);
 }
 
@@ -833,6 +889,7 @@ function startTimer() {
   timerDisplay.textContent = "⏱ ARIANE démarre… 0,0 s";
 
   updateTimer();
+
   timerInterval = window.setInterval(updateTimer, 100);
 }
 
@@ -854,7 +911,8 @@ function resizeInput() {
   if (!input) return;
 
   input.style.height = "auto";
-  input.style.height = `${Math.min(input.scrollHeight, 200)}px`;
+  input.style.height =
+    `${Math.min(input.scrollHeight, 200)}px`;
 }
 
 /* =========================================================
@@ -864,7 +922,9 @@ function resizeInput() {
 async function requestAnalysis(fullInput) {
   if (!supabase || !session?.access_token) {
     return {
-      error: new Error("Connecte-toi avec Google avant d’envoyer un message."),
+      error: new Error(
+        "Connecte-toi avec Google avant d’envoyer un message."
+      ),
       data: { error: "AUTH_REQUIRED" }
     };
   }
@@ -885,7 +945,9 @@ async function requestAnalysis(fullInput) {
     try {
       data = raw ? JSON.parse(raw) : {};
     } catch {
-      data = { message: "Le serveur a renvoyé une réponse illisible." };
+      data = {
+        message: "Le serveur a renvoyé une réponse illisible."
+      };
     }
 
     if (Number.isInteger(data.remaining)) {
@@ -899,6 +961,7 @@ async function requestAnalysis(fullInput) {
     if (response.status === 401) {
       session = null;
       remainingMessages = null;
+
       await refreshSession();
     }
 
@@ -925,14 +988,25 @@ async function requestAnalysis(fullInput) {
    EXÉCUTION D'UN PROMPT
    ========================================================= */
 
-async function runPrompt(fullInput, conversation, answerToReplace = null) {
+async function runPrompt(
+  fullInput,
+  conversation,
+  answerToReplace = null
+) {
   if (busy || !session?.access_token) {
-    setText(status, "Connecte-toi avec Google pour utiliser ARIANE.");
+    setText(
+      status,
+      "Connecte-toi avec Google pour utiliser ARIANE."
+    );
     return;
   }
 
   if (remainingMessages === 0) {
-    setText(status, "Tu as utilisé tes cinq messages pour aujourd’hui.");
+    setText(
+      status,
+      "Tu as utilisé tes cinq messages pour aujourd’hui."
+    );
+
     updateAccountUI();
     return;
   }
@@ -942,7 +1016,9 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
 
   try {
     const result = await requestAnalysis(fullInput);
-    const elapsed = ((Date.now() - requestStartedAt) / 1000).toFixed(1);
+
+    const elapsed =
+      ((Date.now() - requestStartedAt) / 1000).toFixed(1);
 
     if (result.error) {
       setText(status, result.error.message);
@@ -957,7 +1033,8 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     }
 
     const data = result.data;
-    const content = data.analysis || "Aucune réponse n’a été renvoyée.";
+    const content =
+      data.analysis || "Aucune réponse n’a été renvoyée.";
 
     if (answerToReplace) {
       answerToReplace.content = content;
@@ -975,6 +1052,7 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
     }
 
     conversation.updatedAt = Date.now();
+
     saveConversations();
     renderMessages();
 
@@ -983,10 +1061,12 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
       `Réponse reçue en ${elapsed} s · ${data.model || "ARIANE"}`
     );
 
-    timerDisplay.textContent = `✓ Réponse reçue en ${elapsed} s`;
+    timerDisplay.textContent =
+      `✓ Réponse reçue en ${elapsed} s`;
   } finally {
     stopTimer();
     setBusy(false);
+
     saveConversations();
     renderHistory();
     renderMessages();
@@ -1001,7 +1081,11 @@ async function runPrompt(fullInput, conversation, answerToReplace = null) {
    NOUVEL ESSAI D'UNE RÉPONSE
    ========================================================= */
 
-async function retryAnswer(conversationId, answer, userIndex) {
+async function retryAnswer(
+  conversationId,
+  answer,
+  userIndex
+) {
   if (busy || !session || remainingMessages === 0) return;
 
   const conversation = conversations.find(
@@ -1010,7 +1094,10 @@ async function retryAnswer(conversationId, answer, userIndex) {
 
   if (!conversation) return;
 
-  const prompt = answer.retryInput || buildPrompt(conversation, userIndex);
+  const prompt =
+    answer.retryInput ||
+    buildPrompt(conversation, userIndex);
+
   await runPrompt(prompt, conversation, answer);
 }
 
@@ -1022,7 +1109,10 @@ async function sendMessage(text) {
   if (busy || !session || !text.trim()) return;
 
   if (remainingMessages === 0) {
-    setText(status, "Tu as utilisé tes cinq messages pour aujourd’hui.");
+    setText(
+      status,
+      "Tu as utilisé tes cinq messages pour aujourd’hui."
+    );
     return;
   }
 
@@ -1048,16 +1138,22 @@ async function sendMessage(text) {
   });
 
   conversation.updatedAt = Date.now();
+
   updateTitle(conversation);
   saveConversations();
   renderHistory();
   renderMessages();
 
-  input.value = "";
-  resizeInput();
+  if (input) {
+    input.value = "";
+    resizeInput();
+  }
 
   await runPrompt(
-    buildPrompt(conversation, conversation.messages.length - 1),
+    buildPrompt(
+      conversation,
+      conversation.messages.length - 1
+    ),
     conversation
   );
 }
@@ -1072,7 +1168,10 @@ chatForm?.addEventListener("submit", event => {
   if (busy) return;
 
   if (!session) {
-    setText(authStatus, "Connecte-toi avec Google pour commencer.");
+    setText(
+      authStatus,
+      "Connecte-toi avec Google pour commencer."
+    );
     return;
   }
 
@@ -1094,7 +1193,10 @@ toggleSidebar?.addEventListener("click", () => {
 document.querySelectorAll(".suggestion").forEach(suggestion => {
   suggestion.addEventListener("click", () => {
     if (!session) {
-      setText(authStatus, "Connecte-toi avec Google pour commencer.");
+      setText(
+        authStatus,
+        "Connecte-toi avec Google pour commencer."
+      );
       return;
     }
 
@@ -1126,7 +1228,9 @@ async function checkHealth() {
       cache: "no-store"
     });
 
-    if (!response.ok) throw new Error("Backend indisponible");
+    if (!response.ok) {
+      throw new Error("Backend indisponible");
+    }
 
     const data = await response.json();
 
@@ -1137,10 +1241,15 @@ async function checkHealth() {
       : "Backend en ligne · IA non configurée";
 
     if (!data.authConfigured || !data.quotaConfigured) {
-      health.textContent = "Backend en ligne · configuration à vérifier";
+      health.textContent =
+        "Backend en ligne · configuration à vérifier";
     }
   } catch (error) {
-    console.error("Vérification du backend impossible :", error);
+    console.error(
+      "Vérification du backend impossible :",
+      error
+    );
+
     setText(health, "Backend non joignable");
   }
 }
