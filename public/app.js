@@ -1,22 +1,27 @@
-
 "use strict";
 
 import { createClient } from "@supabase/supabase-js";
 
 /* =========================================================
-   ARIANE — Application cliente
+   ARIANE — APPLICATION CLIENTE
    Authentification Google + Supabase
    Historique local + conversations + quota + analyse
+   ARI v1.2 · IOB v1.0 · IFH-TEC
    ========================================================= */
 
-const SUPABASE_URL = "https://spnlejufigfwjetspthx.supabase.co";
+const SUPABASE_URL =
+  "https://spnlejufigfwjetspthx.supabase.co";
+
 const SUPABASE_PUBLISHABLE_KEY =
   "sb_publishable_RjUuJ6usQ__YGdzgwnF5wg_z8b81nEX";
 
 const DAILY_MESSAGE_LIMIT = 5;
 const STORAGE_KEY = "ariane_conversations_v1";
+const REQUEST_TIMEOUT_MS = 60000;
 
-/* Éléments de l'interface */
+/* =========================================================
+   ÉLÉMENTS DE L'INTERFACE
+   ========================================================= */
 
 const health = document.querySelector("#health");
 const input = document.querySelector("#input");
@@ -38,20 +43,25 @@ const authStatus = document.querySelector("#auth-status");
 const userEmail = document.querySelector("#user-email");
 const quotaDisplay = document.querySelector("#quota");
 
-/* État de l'application */
+/* =========================================================
+   ÉTAT
+   ========================================================= */
 
 let conversations = loadConversations();
 let activeId = null;
 let busy = false;
 let timerInterval = null;
 let requestStartedAt = 0;
+
 let supabase = null;
 let session = null;
 let authReady = false;
 let remainingMessages = null;
 let authSubscription = null;
 
-/* Minuterie */
+/* =========================================================
+   MINUTERIE
+   ========================================================= */
 
 const timerDisplay = document.createElement("div");
 timerDisplay.id = "ariane-timer";
@@ -80,8 +90,8 @@ function makeId() {
     `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function setText(element, text) {
-  if (element) element.textContent = text;
+function setText(element, value) {
+  if (element) element.textContent = value;
 }
 
 function loadConversations() {
@@ -90,13 +100,13 @@ function loadConversations() {
       localStorage.getItem(STORAGE_KEY) || "[]"
     );
 
-    return Array.isArray(saved)
-      ? saved.filter(conversation =>
-          conversation &&
-          typeof conversation.id === "string" &&
-          Array.isArray(conversation.messages)
-        )
-      : [];
+    if (!Array.isArray(saved)) return [];
+
+    return saved.filter(item =>
+      item &&
+      typeof item.id === "string" &&
+      Array.isArray(item.messages)
+    );
   } catch (error) {
     console.warn("Historique local indisponible :", error);
     return [];
@@ -110,10 +120,7 @@ function saveConversations() {
       JSON.stringify(conversations)
     );
   } catch (error) {
-    console.error(
-      "Enregistrement de l'historique impossible :",
-      error
-    );
+    console.error("Sauvegarde impossible :", error);
 
     setText(
       status,
@@ -124,7 +131,7 @@ function saveConversations() {
 
 function currentConversation() {
   return conversations.find(
-    conversation => conversation.id === activeId
+    item => item.id === activeId
   ) || null;
 }
 
@@ -140,24 +147,19 @@ function updateQuota(data) {
 }
 
 /* =========================================================
-   AUTHENTIFICATION — SUPABASE INTÉGRÉ AU BUNDLE
+   INTERFACE DU COMPTE
    ========================================================= */
-
-/*
- * Supabase est importé depuis le paquet npm.
- * Esbuild intègre cette dépendance dans app.bundle.js.
- * Aucun CDN Supabase n'est nécessaire dans index.html.
- */
-
-function loadSupabaseLibrary() {
-  return Promise.resolve({ createClient });
-}
 
 function updateAccountUI() {
   const loggedIn = Boolean(session?.access_token);
 
-  if (signedOutPanel) signedOutPanel.hidden = loggedIn;
-  if (signedInPanel) signedInPanel.hidden = !loggedIn;
+  if (signedOutPanel) {
+    signedOutPanel.hidden = loggedIn;
+  }
+
+  if (signedInPanel) {
+    signedInPanel.hidden = !loggedIn;
+  }
 
   if (input) {
     input.disabled =
@@ -170,7 +172,11 @@ function updateAccountUI() {
   }
 
   if (newChatButton) {
-    newChatButton.disabled = busy || !loggedIn;
+    newChatButton.disabled = !loggedIn || busy;
+  }
+
+  if (loginButton) {
+    loginButton.disabled = busy && !loggedIn;
   }
 
   if (loggedIn) {
@@ -194,7 +200,6 @@ function updateAccountUI() {
     }
   } else if (authReady) {
     setText(userEmail, "");
-
     setText(
       quotaDisplay,
       `Messages restants : —/${DAILY_MESSAGE_LIMIT}`
@@ -204,31 +209,111 @@ function updateAccountUI() {
   renderHistory();
 }
 
+/* =========================================================
+   AUTHENTIFICATION SUPABASE
+   ========================================================= */
+
+function createSupabaseClient() {
+  if (!SUPABASE_URL.startsWith("https://")) {
+    throw new Error("L'URL Supabase est invalide.");
+  }
+
+  if (
+    !SUPABASE_PUBLISHABLE_KEY ||
+    SUPABASE_PUBLISHABLE_KEY.startsWith("COLLE_ICI_")
+  ) {
+    throw new Error("La clé publique Supabase est absente.");
+  }
+
+  return createClient(
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: "pkce"
+      }
+    }
+  );
+}
+
 async function refreshSession() {
-  if (!supabase) return;
+  if (!supabase) {
+    throw new Error("Le client Supabase n'est pas initialisé.");
+  }
+
+  const result = await Promise.race([
+    supabase.auth.getSession(),
+    new Promise((_, reject) => {
+      window.setTimeout(
+        () => reject(
+          new Error("Supabase ne répond pas après 10 secondes.")
+        ),
+        10000
+      );
+    })
+  ]);
+
+  if (result.error) throw result.error;
+
+  session = result.data?.session || null;
+  authReady = true;
+
+  updateAccountUI();
+
+  setText(
+    authStatus,
+    session
+      ? "Compte Google connecté."
+      : "Connecte-toi avec Google pour commencer."
+  );
+}
+
+async function initializeAuth() {
+  authReady = false;
+  setText(authStatus, "Initialisation de la connexion…");
 
   try {
-    const { data, error } = await supabase.auth.getSession();
+    supabase = createSupabaseClient();
 
-    if (error) throw error;
+    if (authSubscription?.unsubscribe) {
+      authSubscription.unsubscribe();
+    }
 
-    session = data?.session || null;
-    authReady = true;
+    const result = supabase.auth.onAuthStateChange(
+      (event, newSession) => {
+        session = newSession || null;
+        authReady = true;
 
-    updateAccountUI();
+        if (
+          event === "SIGNED_OUT" ||
+          event === "INITIAL_SESSION" && !newSession
+        ) {
+          remainingMessages = null;
+        }
 
-    setText(
-      authStatus,
-      session
-        ? "Compte Google connecté."
-        : "Connecte-toi avec Google pour commencer."
+        updateAccountUI();
+
+        if (event === "SIGNED_IN") {
+          setText(authStatus, "Compte Google connecté.");
+        } else if (event === "SIGNED_OUT") {
+          setText(authStatus, "Tu n'es pas connecté.");
+          renderMessages();
+        } else if (event === "TOKEN_REFRESHED") {
+          setText(authStatus, "Session actualisée.");
+        }
+      }
     );
+
+    authSubscription = result.data.subscription;
+
+    await refreshSession();
   } catch (error) {
-    console.error(
-      "Session Supabase indisponible :",
-      error
-    );
+    console.error("Initialisation Supabase impossible :", error);
 
+    supabase = null;
     session = null;
     authReady = true;
 
@@ -236,7 +321,7 @@ async function refreshSession() {
 
     setText(
       authStatus,
-      `Impossible de vérifier la session : ${error.message || "erreur inconnue"}. Recharge la page.`
+      `Initialisation impossible : ${error.message || "erreur inconnue"}. Recharge la page.`
     );
   }
 }
@@ -245,17 +330,13 @@ async function signInWithGoogle() {
   if (!supabase) {
     setText(
       authStatus,
-      "Supabase n'est pas initialisé. Recharge la page et réessaie."
+      "Supabase n'est pas initialisé. Recharge la page."
     );
     return;
   }
 
   if (loginButton) loginButton.disabled = true;
-
-  setText(
-    authStatus,
-    "Ouverture de la connexion Google…"
-  );
+  setText(authStatus, "Ouverture de la connexion Google…");
 
   try {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -307,96 +388,6 @@ async function signOut() {
   }
 }
 
-async function initializeAuth() {
-  authReady = false;
-
-  setText(
-    authStatus,
-    "Initialisation de la connexion…"
-  );
-
-  if (
-    !SUPABASE_URL.startsWith("https://") ||
-    !SUPABASE_PUBLISHABLE_KEY ||
-    SUPABASE_PUBLISHABLE_KEY.startsWith("COLLE_ICI_")
-  ) {
-    authReady = true;
-    session = null;
-
-    updateAccountUI();
-
-    setText(
-      authStatus,
-      "Configuration Supabase invalide : vérifie l'URL et la clé publique."
-    );
-
-    return;
-  }
-
-  try {
-    const library = await loadSupabaseLibrary();
-
-    supabase = library.createClient(
-      SUPABASE_URL,
-      SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: {
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-          flowType: "pkce"
-        }
-      }
-    );
-
-    if (authSubscription?.unsubscribe) {
-      authSubscription.unsubscribe();
-    }
-
-    const result = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        session = newSession || null;
-        authReady = true;
-
-        if (event === "SIGNED_OUT") {
-          remainingMessages = null;
-        }
-
-        updateAccountUI();
-
-        if (event === "SIGNED_IN") {
-          setText(authStatus, "Compte Google connecté.");
-        } else if (event === "SIGNED_OUT") {
-          setText(authStatus, "Tu n'es pas connecté.");
-          renderMessages();
-        } else if (event === "TOKEN_REFRESHED") {
-          setText(authStatus, "Session actualisée.");
-        }
-      }
-    );
-
-    authSubscription = result.data.subscription;
-
-    await refreshSession();
-  } catch (error) {
-    console.error(
-      "Initialisation Supabase impossible :",
-      error
-    );
-
-    supabase = null;
-    session = null;
-    authReady = true;
-
-    updateAccountUI();
-
-    setText(
-      authStatus,
-      `Initialisation Supabase impossible : ${error.message || "erreur inconnue"}`
-    );
-  }
-}
-
 /* =========================================================
    CONVERSATIONS
    ========================================================= */
@@ -433,13 +424,13 @@ function updateTitle(conversation) {
     message => message.role === "user"
   );
 
-  if (firstUserMessage) {
-    conversation.title =
-      firstUserMessage.content
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 48) || "Nouvelle conversation";
-  }
+  if (!firstUserMessage) return;
+
+  conversation.title =
+    firstUserMessage.content
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 48) || "Nouvelle conversation";
 }
 
 function renderHistory() {
@@ -476,7 +467,6 @@ function renderHistory() {
       if (busy) return;
 
       activeId = conversation.id;
-
       renderHistory();
       renderMessages();
 
@@ -489,12 +479,10 @@ function renderHistory() {
     remove.className = "history-delete";
     remove.textContent = "×";
     remove.title = "Supprimer cette conversation";
-
     remove.setAttribute(
       "aria-label",
       `Supprimer ${open.textContent}`
     );
-
     remove.disabled = busy;
 
     remove.addEventListener("click", () => {
@@ -536,13 +524,13 @@ function makeActionButton(
   onClick,
   background = "#383d46"
 ) {
-  const b = document.createElement("button");
+  const element = document.createElement("button");
 
-  b.type = "button";
-  b.textContent = label;
-  b.title = title;
+  element.type = "button";
+  element.textContent = label;
+  element.title = title;
 
-  Object.assign(b.style, {
+  Object.assign(element.style, {
     display: "inline-block",
     padding: "8px 12px",
     margin: "6px 8px 4px 0",
@@ -554,12 +542,12 @@ function makeActionButton(
     cursor: "pointer"
   });
 
-  b.addEventListener("click", onClick);
+  element.addEventListener("click", onClick);
 
-  return b;
+  return element;
 }
 
-async function copyText(text, b) {
+async function copyText(text, element) {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);
@@ -575,24 +563,24 @@ async function copyText(text, b) {
       document.body.append(area);
       area.select();
 
-      const ok = document.execCommand("copy");
+      const copied = document.execCommand("copy");
       area.remove();
 
-      if (!ok) throw new Error("Copie impossible");
+      if (!copied) throw new Error("Copie impossible.");
     }
 
-    b.textContent = "Copié !";
+    element.textContent = "Copié !";
 
     window.setTimeout(() => {
-      b.textContent = "Copier";
+      element.textContent = "Copier";
     }, 1400);
   } catch (error) {
     console.error("Copie impossible :", error);
 
-    b.textContent = "Copie impossible";
+    element.textContent = "Copie impossible";
 
     window.setTimeout(() => {
-      b.textContent = "Copier";
+      element.textContent = "Copier";
     }, 1800);
   }
 }
@@ -616,8 +604,8 @@ function buildPrompt(conversation, userIndex) {
   }).join("\n\n");
 
   return [
-    "CONVERSATION ARIANE — CONTEXTE DES ÉCHANGES PRÉCÉDENTS",
-    "Les messages précédents servent de contexte. Réponds au dernier message de l'utilisateur.",
+    "ARIANE — CONTEXTE DES ÉCHANGES PRÉCÉDENTS",
+    "Réponds au dernier message en tenant compte du contexte.",
     transcript || "(Début de la conversation.)",
     "NOUVEAU MESSAGE DE L'UTILISATEUR :",
     userMessage.content
@@ -717,7 +705,7 @@ function renderMessages() {
       if (userIndex >= 0) {
         const retry = makeActionButton(
           "↻ Réessayer",
-          "Demander une nouvelle réponse au même prompt",
+          "Demander une nouvelle réponse",
           () => retryAnswer(conversation.id, message, userIndex),
           "#244a39"
         );
@@ -746,12 +734,10 @@ function renderMessages() {
   window.requestAnimationFrame(() => {
     const panel = document.querySelector(".conversation");
 
-    if (panel) {
-      panel.scrollTo({
-        top: panel.scrollHeight,
-        behavior: "smooth"
-      });
-    }
+    panel?.scrollTo({
+      top: panel.scrollHeight,
+      behavior: "smooth"
+    });
   });
 }
 
@@ -772,14 +758,11 @@ function editLastMessage(conversationId) {
   if (index < 0) return;
 
   const message = conversation.messages[index];
-
-  const rows =
-    messagesEl?.querySelectorAll(".message.user") || [];
-
+  const rows = messagesEl?.querySelectorAll(".message.user") || [];
   const row = rows[rows.length - 1];
 
   if (!row) {
-    setText(status, "Impossible d’ouvrir l’éditeur de ce message.");
+    setText(status, "Impossible d’ouvrir l’éditeur.");
     return;
   }
 
@@ -794,10 +777,7 @@ function editLastMessage(conversationId) {
 
   const editor = document.createElement("textarea");
   editor.value = message.content;
-  editor.setAttribute(
-    "aria-label",
-    "Modifier le dernier message"
-  );
+  editor.setAttribute("aria-label", "Modifier le dernier message");
 
   Object.assign(editor.style, {
     display: "block",
@@ -818,7 +798,7 @@ function editLastMessage(conversationId) {
 
   const save = makeActionButton(
     "Enregistrer et relancer",
-    "Enregistrer le texte corrigé et demander une nouvelle réponse",
+    "Enregistrer et relancer l'analyse",
     async () => {
       const corrected = editor.value.trim();
 
@@ -842,10 +822,7 @@ function editLastMessage(conversationId) {
       renderMessages();
 
       await runPrompt(
-        buildPrompt(
-          conversation,
-          conversation.messages.length - 1
-        ),
+        buildPrompt(conversation, conversation.messages.length - 1),
         conversation
       );
     },
@@ -860,7 +837,6 @@ function editLastMessage(conversationId) {
 
   controls.append(save, cancel);
   body.append(name, editor, controls);
-
   editor.focus();
 }
 
@@ -889,7 +865,6 @@ function startTimer() {
   timerDisplay.textContent = "⏱ ARIANE démarre… 0,0 s";
 
   updateTimer();
-
   timerInterval = window.setInterval(updateTimer, 100);
 }
 
@@ -916,7 +891,7 @@ function resizeInput() {
 }
 
 /* =========================================================
-   REQUÊTE AU SERVEUR ARIANE
+   APPEL DU BACKEND
    ========================================================= */
 
 async function requestAnalysis(fullInput) {
@@ -929,6 +904,12 @@ async function requestAnalysis(fullInput) {
     };
   }
 
+  const controller = new AbortController();
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS
+  );
+
   try {
     const response = await fetch("/api/analyze", {
       method: "POST",
@@ -936,7 +917,8 @@ async function requestAnalysis(fullInput) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`
       },
-      body: JSON.stringify({ input: fullInput })
+      body: JSON.stringify({ input: fullInput }),
+      signal: controller.signal
     });
 
     const raw = await response.text();
@@ -961,8 +943,7 @@ async function requestAnalysis(fullInput) {
     if (response.status === 401) {
       session = null;
       remainingMessages = null;
-
-      await refreshSession();
+      await refreshSession().catch(() => {});
     }
 
     return {
@@ -975,12 +956,16 @@ async function requestAnalysis(fullInput) {
   } catch (error) {
     console.error("Requête ARIANE impossible :", error);
 
+    const message = error.name === "AbortError"
+      ? "Délai dépassé : le serveur ARIANE met trop de temps à répondre."
+      : error.message || "Impossible de joindre le serveur ARIANE.";
+
     return {
-      error: new Error(
-        error.message || "Impossible de joindre le serveur ARIANE."
-      ),
+      error: new Error(message),
       data: {}
     };
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
@@ -994,19 +979,12 @@ async function runPrompt(
   answerToReplace = null
 ) {
   if (busy || !session?.access_token) {
-    setText(
-      status,
-      "Connecte-toi avec Google pour utiliser ARIANE."
-    );
+    setText(status, "Connecte-toi avec Google pour utiliser ARIANE.");
     return;
   }
 
   if (remainingMessages === 0) {
-    setText(
-      status,
-      "Tu as utilisé tes cinq messages pour aujourd’hui."
-    );
-
+    setText(status, "Tu as utilisé tes cinq messages pour aujourd’hui.");
     updateAccountUI();
     return;
   }
@@ -1106,13 +1084,12 @@ async function retryAnswer(
    ========================================================= */
 
 async function sendMessage(text) {
-  if (busy || !session || !text.trim()) return;
+  const content = text.trim();
+
+  if (busy || !session || !content) return;
 
   if (remainingMessages === 0) {
-    setText(
-      status,
-      "Tu as utilisé tes cinq messages pour aujourd’hui."
-    );
+    setText(status, "Tu as utilisé tes cinq messages pour aujourd’hui.");
     return;
   }
 
@@ -1132,7 +1109,7 @@ async function sendMessage(text) {
 
   conversation.messages.push({
     role: "user",
-    content: text.trim(),
+    content,
     id: makeId(),
     createdAt: Date.now()
   });
@@ -1150,16 +1127,13 @@ async function sendMessage(text) {
   }
 
   await runPrompt(
-    buildPrompt(
-      conversation,
-      conversation.messages.length - 1
-    ),
+    buildPrompt(conversation, conversation.messages.length - 1),
     conversation
   );
 }
 
 /* =========================================================
-   ÉVÉNEMENTS DE L'INTERFACE
+   ÉVÉNEMENTS
    ========================================================= */
 
 chatForm?.addEventListener("submit", event => {
@@ -1168,10 +1142,7 @@ chatForm?.addEventListener("submit", event => {
   if (busy) return;
 
   if (!session) {
-    setText(
-      authStatus,
-      "Connecte-toi avec Google pour commencer."
-    );
+    setText(authStatus, "Connecte-toi avec Google pour commencer.");
     return;
   }
 
@@ -1193,10 +1164,7 @@ toggleSidebar?.addEventListener("click", () => {
 document.querySelectorAll(".suggestion").forEach(suggestion => {
   suggestion.addEventListener("click", () => {
     if (!session) {
-      setText(
-        authStatus,
-        "Connecte-toi avec Google pour commencer."
-      );
+      setText(authStatus, "Connecte-toi avec Google pour commencer.");
       return;
     }
 
@@ -1229,7 +1197,7 @@ async function checkHealth() {
     });
 
     if (!response.ok) {
-      throw new Error("Backend indisponible");
+      throw new Error(`Backend indisponible (${response.status}).`);
     }
 
     const data = await response.json();
@@ -1245,11 +1213,7 @@ async function checkHealth() {
         "Backend en ligne · configuration à vérifier";
     }
   } catch (error) {
-    console.error(
-      "Vérification du backend impossible :",
-      error
-    );
-
+    console.error("Vérification du backend impossible :", error);
     setText(health, "Backend non joignable");
   }
 }
