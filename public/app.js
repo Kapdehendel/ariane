@@ -1,5 +1,6 @@
 
 "use strict";
+import { createClient } from "@supabase/supabase-js";
 
 /* =========================================================
    ARIANE — Application cliente
