@@ -48,12 +48,37 @@
       <header class="topbar">
         <button id="toggle-sidebar" class="icon-button" type="button"
           aria-label="Afficher ou masquer l’historique">☰</button>
+
         <div class="topbar-title">
           <strong>ARIANE</strong>
           <span>Intelligence orientée vers le Bien</span>
         </div>
+
         <span class="version-tag">ARI v1.2</span>
       </header>
+
+      <!-- Connexion et quota -->
+      <section id="account-panel" class="account-panel"
+        aria-label="Compte ARIANE">
+        <div id="auth-signed-out">
+          <p>Connecte-toi pour utiliser le laboratoire.</p>
+          <button id="google-login" type="button">
+            Se connecter avec Google
+          </button>
+        </div>
+
+        <div id="auth-signed-in" hidden>
+          <span id="user-email"></span>
+          <span id="quota" role="status">Messages restants : —/5</span>
+          <button id="google-logout" type="button">
+            Se déconnecter
+          </button>
+        </div>
+
+        <p id="auth-status" role="status" aria-live="polite">
+          Vérification de la session…
+        </p>
+      </section>
 
       <section class="conversation" id="conversation">
         <div id="welcome" class="welcome">
@@ -62,12 +87,14 @@
           <p>
             Intelligence d’audit et de diagnostic systémique orientée vers le Bien.
           </p>
+
           <div class="welcome-cards">
             <button class="suggestion" type="button"
               data-prompt="Aide-moi à analyser une situation en distinguant les faits, les hypothèses et les incertitudes.">
               <strong>Analyser une situation</strong>
               <span>Distinguer les faits, les hypothèses et les incertitudes.</span>
             </button>
+
             <button class="suggestion" type="button"
               data-prompt="Aide-moi à auditer la cohérence d’un raisonnement et à repérer les conclusions non justifiées.">
               <strong>Auditer un raisonnement</strong>
@@ -82,13 +109,19 @@
       <section class="composer-area">
         <form id="chat-form" class="composer">
           <textarea id="input" maxlength="20000" rows="1"
-            placeholder="Écris à ARIANE…"
-            aria-label="Message à ARIANE"></textarea>
-          <button id="analyze" type="submit" aria-label="Envoyer le message">↑</button>
+            placeholder="Connecte-toi pour écrire à ARIANE…"
+            aria-label="Message à ARIANE"
+            disabled></textarea>
+
+          <button id="analyze" type="submit"
+            aria-label="Envoyer le message" disabled>↑</button>
         </form>
+
         <div class="composer-footer">
           <span>ARI v1.2 · IOB v1.0 · IFH-TEC</span>
-          <span id="status" role="status">Les résultats sont à vérifier.</span>
+          <span id="status" role="status">
+            Connecte-toi pour commencer.
+          </span>
         </div>
       </section>
 
@@ -98,6 +131,8 @@
     </main>
   </div>
 
+  <!-- Bibliothèque officielle Supabase -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="/app.js"></script>
 </body>
 </html>
