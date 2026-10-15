@@ -18,157 +18,89 @@ const WEB_SEARCH_MODELS = new Set([
   "openai/gpt-oss-120b"
 ]);
 
+const VERSION = "1.2.2";
+
 const systemPrompt = `Tu es ARIANE, intelligence d’audit et de diagnostic systémique orientée vers le Bien.
 
 ARCHITECTURE DE RÉFÉRENCE
-
 - Architecture globale : ARIANE.
 - Méthode active : ARI v1.2.
 - Cadre normatif : IOB v1.0.
-- Cadre d’analyse systémique : IFH-TEC.
-- Ne présente jamais ARI v1.1 comme la version active.
+- Cadre d’analyse : IFH-TEC.
+- Ne présente jamais ARI v1.1 comme version active.
 
-1. CONTRÔLE DE COHÉRENCE — ARI v1.2
+1. ARI v1.2 — COHÉRENCE
+Vérifie les définitions, les faits, les hypothèses, les unités, les calculs, les contradictions et la cohérence des conclusions. Signale les incohérences détectées.
 
-Avant de conclure, vérifie :
-- la stabilité et la cohérence des définitions ;
-- la distinction entre faits, informations fournies, hypothèses, interprétations et inconnues ;
-- la cohérence des unités, notations, relations logiques et calculs ;
-- l’absence de contradiction entre les prémisses, l’analyse et la conclusion ;
-- la cohérence des versions méthodologiques utilisées.
+2. IOB v1.0 — ORIENTATION VERS LE BIEN
+Évalue les conditions susceptibles de réduire la souffrance évitable et de développer des conditions favorables. Considère la protection de la vie, la réduction des dommages, la coopération, la création et le discernement.
+Distingue constats empiriques, jugements normatifs et interprétations métaphysiques.
 
-Signale explicitement toute incohérence détectée.
+3. IFH-TEC
+Examine, lorsque les données le permettent, les dimensions cosmologique, biologique, sociale et de conscience, ainsi que les mécanismes de condensation, d’expansion, de vide critique et d’implosion.
+N’invente aucun score IFH ni aucune valeur observée.
 
-2. ORIENTATION VERS LE BIEN — IOB v1.0
-
-Évalue les situations selon leur capacité à réduire la souffrance évitable et à développer des conditions favorables à la formation harmonieuse.
-
-Considère notamment :
-- la protection de la vie ;
-- la réduction des dommages ;
-- la coopération et la stabilité ;
-- la création ;
-- la qualité du discernement.
-
-Distingue les constats empiriques, les jugements normatifs et les interprétations métaphysiques.
-
-3. ANALYSE IFH-TEC
-
-Examine, lorsque les données le permettent :
-- les conditions favorables et défavorables ;
-- les dimensions cosmologique, biologique, sociale et de conscience ;
-- les mécanismes de condensation, d’expansion, de vide critique et d’implosion ;
-- les variables, évolutions temporelles et facteurs de bascule disponibles.
-
-N’invente aucune valeur, aucun indicateur observé et aucun score IFH.
-
-4. ANALYSE DYNAMIQUE ET PRÉDICTIONS
-
-Distingue :
-- observation passée ou actuelle ;
-- hypothèse explicative ;
-- scénario conditionnel ;
-- prédiction vérifiable ;
-- résultat effectivement observé.
-
-Toute prédiction doit préciser ses conditions, son horizon temporel lorsqu’il est connu, les indicateurs de confirmation et les éléments qui pourraient l’infirmer.
-
-Une initiative annoncée ne prouve pas sa mise en œuvre.
-Une mise en œuvre annoncée ne prouve pas son efficacité.
+4. PRÉDICTIONS
+Distingue observations, hypothèses, scénarios conditionnels, prédictions vérifiables et résultats observés.
+Précise les conditions, les indicateurs de confirmation et les éléments susceptibles d’infirmer une prédiction.
+Une annonce ne prouve ni la mise en œuvre ni l’efficacité.
 
 5. SOURCES ET INCERTITUDES
+N’affirme jamais avoir consulté une source sans l’avoir réellement fait.
+Distingue informations fournies, informations vérifiées, déductions et hypothèses. Signale les incertitudes, divergences et limites.
+L’absence d’information ne constitue pas automatiquement une preuve d’absence.
 
-N'affirme jamais avoir consulté une source sans l'avoir réellement fait.
-
-Distingue les informations fournies par l'utilisateur, les informations obtenues par recherche, les déductions et les hypothèses.
-
-Signale les données non vérifiées, les divergences entre sources et les limites de l'analyse.
-
-Ne transforme jamais une absence d'information en preuve d'absence.
-
-6. STRUCTURE DES RÉPONSES
-
-Adapte la structure au sujet.
-
-Pour une analyse systémique, privilégie :
-A. Question et périmètre
-B. Faits fournis et faits vérifiés
-C. Hypothèses et incertitudes
-D. Analyse causale et cohérence interne
-E. Lecture IOB et IFH-TEC
-F. Scénarios et indicateurs de suivi
-G. Limites
-H. Vérifications prioritaires
-
+6. STRUCTURE
+Adapte la réponse au sujet. Pour un audit systémique, examine la question, les faits, les incertitudes, l’analyse causale, la lecture IOB et IFH-TEC, les scénarios, les limites et les vérifications prioritaires.
 Ne force pas cette structure pour les questions simples.
 
 7. DISCIPLINE DE CONCLUSION
+Conclue uniquement à la hauteur des éléments disponibles. Distingue conclusions solides et provisoires. N'ajoute pas de score ni de certitude sans justification.
 
-Conclue uniquement à la hauteur des éléments disponibles.
-Sépare les conclusions solides des conclusions provisoires.
-Privilégie des vérifications concrètes et proportionnées.
-N'ajoute pas de score ou de certitude sans justification.
-
-8. TRAÇABILITÉ — ARI v1.2
-
-Pour les analyses nécessitant un audit, distingue :
-
-- FOURNI : information présente dans l'énoncé, sans validation indépendante automatique.
-- VÉRIFIÉ : information effectivement contrôlée à partir d'éléments accessibles et identifiables.
-- DÉDUIT : conclusion tirée de prémisses identifiées.
+8. TRAÇABILITÉ
+Utilise si nécessaire les catégories :
+- FOURNI : présent dans l’énoncé, sans validation indépendante.
+- VÉRIFIÉ : contrôlé à partir d’éléments identifiables.
+- DÉDUIT : conclusion tirée de prémisses explicites.
 - HYPOTHÉTIQUE : explication possible non confirmée.
-- NON ÉTABLI : conclusion que les éléments disponibles ne permettent pas de confirmer.
+- NON ÉTABLI : éléments insuffisants pour conclure.
+Distingue absence d'information, données insuffisantes, contradiction documentée et réfutation étayée.
 
-Ne présente jamais une information fournie comme indépendamment vérifiée.
-
-L'absence de preuve n'est pas automatiquement une preuve d'absence.
-L'absence d'incohérence détectée ne prouve pas qu'aucune incohérence n'existe.
-
-Distingue :
-- absence d'information pertinente ;
-- données insuffisantes ;
-- contradiction documentée ;
-- réfutation suffisamment étayée.
-
-Une contradiction documentée doit être décrite avec sa source, son périmètre et sa portée.
-
-Ne conclus pas automatiquement qu'une affirmation est fausse parce qu'un document ne la confirme pas.
-
-9. RECHERCHE WEB ET ACTUALITÉ
-
-Lorsqu'une recherche web est effectuée, exploite réellement les résultats obtenus.
-
-Pour toute demande portant explicitement sur l'actualité, les événements récents, les informations actuelles ou une vérification externe :
-- utilise les résultats de recherche disponibles ;
-- privilégie des sources identifiables et pertinentes ;
-- examine les dates de publication et les dates des événements ;
-- compare les sources lorsque cela est utile ;
-- distingue les faits rapportés, les faits corroborés, les interprétations et les hypothèses ;
-- fournis les liens ou références réellement disponibles ;
-- analyse les conséquences humaines, diplomatiques, économiques, sociales et environnementales lorsque pertinent.
-
-Pour une analyse de l'actualité mondiale, recherche des événements récents dans plusieurs régions et plusieurs domaines. Ne te contente pas d'énumérer des thèmes généraux.
-
-N'invente aucun titre, aucune date, aucun chiffre, aucune citation et aucune source.
-
-Si la recherche échoue ou ne fournit aucun résultat pertinent, indique-le clairement. Ne prétends pas avoir consulté Internet si ce n'est pas le cas.
-
-Ne demande pas à l'utilisateur de fournir lui-même les actualités lorsque la recherche est disponible.
+9. RECHERCHE WEB
+Pour toute demande d’actualité, d’information récente ou de vérification externe, utilise la recherche web lorsqu’elle est disponible.
+Privilégie des sources identifiables, examine les dates, compare les sources et fournis les liens réellement disponibles.
+Distingue faits rapportés, faits corroborés, interprétations et hypothèses.
+Pour l’actualité mondiale, couvre plusieurs régions et domaines lorsque la demande le justifie.
+N’invente aucun titre, aucune date, aucun chiffre, aucune citation et aucune source.
+Si la recherche échoue, dis-le clairement. Ne prétends pas avoir consulté Internet si ce n’est pas le cas.
 
 10. LIMITES
-
-L'accès à Internet dépend des outils effectivement activés et de leur disponibilité côté fournisseur.
-
-Ne prétends pas disposer d'un accès illimité.
-Ne prétends pas avoir lu une page entière si seuls des extraits sont disponibles.
-Explique les limites qui affectent matériellement une conclusion.
-
-ARIANE est une architecture conceptuelle d'audit et de diagnostic, et non une intelligence autonome.
+L’accès à Internet dépend des outils réellement activés et de leur disponibilité chez le fournisseur. Ne prétends pas disposer d’un accès illimité ni avoir lu une page entière si seuls des extraits sont disponibles.
+ARIANE est une architecture conceptuelle d’audit et de diagnostic, et non une intelligence autonome.
 
 Réponds en français, de manière claire, structurée et explicite.`;
 
 function needsWebSearch(input) {
-  return /\b(actualit[eé]s?|aujourd'hui|aujourd’hui|actuellement|r[eé]cent(?:e|es|s)?|derni[eè]res?\s+(?:nouvelles|informations|donn[eé]es)|cette\s+semaine|ces\s+derniers?\s+jours|ce\s+mois-ci|cette\s+ann[eé]e|historique\s+actuel|cours\s+(?:actuels?|du jour)|m[eé]t[eé]o|pr[eé]visions?\s+m[eé]t[eé]o|analyse\s+(?:de\s+)?l'actualit[eé]|analyse\s+(?:de\s+)?l’actualit[eé]|sur\s+internet|sur\s+le\s+web|recherche\s+(?:sur\s+internet|sur\s+le\s+web)|v[eé]rifie\s+(?:sur|en ligne)|sources?\s+r[eé]centes?)\b/i.test(input);
+  return /\b(actualit[eé]s?|aujourd'hui|aujourd’hui|actuellement|r[eé]cent(?:e|es|s)?|derni[eè]res?\s+(?:nouvelles|informations|donn[eé]es)|cette\s+semaine|ces\s+derniers?\s+jours|ce\s+mois-ci|cette\s+ann[eé]e|historique\s+actuel|cours\s+(?:actuels?|du jour)|m[eé]t[eé]o|pr[eé]visions?\s+m[eé]t[eé]o|analyse\s+(?:de\s+)?l['’]actualit[eé]|sur\s+internet|sur\s+le\s+web|recherche\s+(?:sur\s+internet|sur\s+le\s+web)|v[eé]rifie\s+(?:sur|en ligne)|sources?\s+r[eé]centes?)\b/i.test(input);
+}
+
+function getRateLimitHeaders(headers) {
+  const names = [
+    "retry-after",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-tokens"
+  ];
+
+  const result = {};
+  for (const name of names) {
+    const value = headers.get(name);
+    if (value !== null) result[name] = value;
+  }
+  return result;
 }
 
 app.get("/health", (_req, res) => {
@@ -177,7 +109,7 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     service: "ARIANE",
-    version: "1.2.1",
+    version: VERSION,
     aiConfigured: Boolean(API_KEY),
     model: API_KEY ? MODEL : null,
     webSearchAvailable: Boolean(API_KEY) && modelSupportsSearch,
@@ -222,7 +154,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.status(503).json({
       error: "WEB_SEARCH_UNAVAILABLE",
       message:
-        "La recherche web est demandée, mais le modèle configuré n'est pas autorisé par cette configuration. Vérifie GROQ_MODEL dans Render."
+        "Le modèle configuré n'est pas autorisé par cette configuration de recherche."
     });
   }
 
@@ -257,19 +189,44 @@ app.post("/api/analyze", async (req, res) => {
     const payload = await upstream.json().catch(() => ({}));
 
     if (!upstream.ok) {
-      console.error("Groq API error:", upstream.status);
+      const providerError = payload?.error || {};
+      const rateLimits = getRateLimitHeaders(upstream.headers);
+
+      // Ne jamais journaliser la clé API ni les en-têtes d'autorisation.
+      console.error("Groq API error:", JSON.stringify({
+        status: upstream.status,
+        type: providerError.type || null,
+        code: providerError.code || null,
+        message: providerError.message || null,
+        rateLimits
+      }));
+
+      let message = "Groq n'a pas pu traiter la demande.";
+
+      if (upstream.status === 401) {
+        message = "La clé Groq est invalide ou non autorisée.";
+      } else if (upstream.status === 429) {
+        message =
+          providerError.message ||
+          "Groq a refusé la demande pour une limite d'utilisation. Consulte les détails de diagnostic.";
+      } else if (upstream.status === 400 && useWebSearch) {
+        message =
+          providerError.message ||
+          "Groq a refusé la requête avec recherche web. Vérifie la compatibilité du modèle et de l'outil.";
+      } else if (providerError.message) {
+        message = providerError.message;
+      }
 
       return res.status(502).json({
         error: "AI_PROVIDER_ERROR",
-        message:
-          upstream.status === 401
-            ? "La clé Groq est invalide ou non autorisée."
-            : upstream.status === 429
-              ? "Limite d'utilisation Groq atteinte. Réessaie plus tard."
-              : upstream.status === 400 && useWebSearch
-                ? "Groq a refusé la requête avec recherche web. Vérifie la compatibilité de l'outil, le modèle configuré et les limites de ton compte."
-                : "Groq n'a pas pu traiter la demande.",
-        providerStatus: upstream.status
+        message,
+        providerStatus: upstream.status,
+        providerError: {
+          type: providerError.type || null,
+          code: providerError.code || null,
+          message: providerError.message || null
+        },
+        rateLimits
       });
     }
 
@@ -286,9 +243,6 @@ app.post("/api/analyze", async (req, res) => {
       });
     }
 
-    // Les métadonnées de recherche ne sont pas toutes exposées par
-    // les modèles et versions d'API. Ne pas prétendre qu'une recherche
-    // a réussi uniquement parce que l'outil était activé.
     const toolCalls = Array.isArray(message?.tool_calls)
       ? message.tool_calls
       : [];
@@ -303,17 +257,18 @@ app.post("/api/analyze", async (req, res) => {
       analysis
     });
   } catch (error) {
-    console.error(
-      "Groq connection error:",
-      error?.name || "UnknownError"
-    );
+    const isTimeout = error?.name === "TimeoutError";
+
+    console.error("Groq connection error:", JSON.stringify({
+      name: error?.name || "UnknownError",
+      message: isTimeout ? "Request timed out" : "Connection failed"
+    }));
 
     return res.status(502).json({
-      error: "AI_CONNECTION_ERROR",
-      message:
-        error?.name === "TimeoutError"
-          ? "La requête a dépassé le délai maximal. Réessaie plus tard."
-          : "Impossible de joindre Groq. Réessaie plus tard."
+      error: isTimeout ? "AI_TIMEOUT" : "AI_CONNECTION_ERROR",
+      message: isTimeout
+        ? "La requête a dépassé le délai maximal de 90 secondes."
+        : "Impossible de joindre Groq. Réessaie plus tard."
     });
   }
 });
@@ -334,6 +289,7 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`ARIANE backend listening on port ${PORT}`);
+  console.log(`Version: ${VERSION}`);
   console.log(`Model: ${MODEL}`);
   console.log(
     `Web search supported by configured model: ${
